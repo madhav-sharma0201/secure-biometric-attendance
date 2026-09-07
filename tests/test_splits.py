@@ -62,3 +62,57 @@ def test_too_few_subjects_raises_rather_than_silently_emptying_a_split():
 def test_summarise_reports_all_splits():
     out = summarise(split_by_subject(make_rows()))
     assert "train" in out and "val" in out and "test" in out
+
+
+# --- clip-level grouping (used when the dataset has no subject IDs) ---
+
+def test_clip_grouping_keeps_each_source_video_in_one_split():
+    from ml.preprocessing.splits import split_by_group
+    rows = [
+        {"clip_id": f"v{v}_seq{s}", "clip": f"v{v}", "label": "live", "subject": "unknown"}
+        for v in range(12) for s in range(5)
+    ]
+    splits = split_by_group(rows, group_key="clip")
+    members = {n: {r["clip"] for r in rs} for n, rs in splits.items()}
+    assert members["train"] & members["test"] == set()
+    assert members["train"] & members["val"] == set()
+    # every sequence from a video travels with its video
+    assert sum(len(rs) for rs in splits.values()) == len(rows)
+
+
+def test_clip_grouping_detects_leakage_on_the_clip_key():
+    from ml.preprocessing.splits import LeakageError, assert_no_leakage
+    leaking = {
+        "train": [{"clip": "v1", "subject": "unknown"}],
+        "test": [{"clip": "v1", "subject": "unknown"}],
+    }
+    with pytest.raises(LeakageError, match="v1"):
+        assert_no_leakage(leaking, group_key="clip")
+
+
+def test_every_split_contains_both_classes():
+    """A split with no live samples makes BPCER undefined; stratification prevents it."""
+    from ml.preprocessing.splits import split_by_group
+    rows = [
+        {"clip_id": f"c{i}", "clip": f"c{i}", "subject": f"c{i}",
+         "label": "live" if i < 8 else "spoof"}
+        for i in range(16)
+    ]
+    splits = split_by_group(rows, group_key="clip")
+    for name, rs in splits.items():
+        labels = {r["label"] for r in rs}
+        assert labels == {"live", "spoof"}, f"{name} split has only {labels}"
+
+
+def test_stratification_still_respects_group_boundaries():
+    from ml.preprocessing.splits import split_by_group
+    rows = [
+        {"clip": f"v{v}", "subject": f"v{v}", "label": "live" if v < 8 else "spoof",
+         "seq": s}
+        for v in range(16) for s in range(3)
+    ]
+    splits = split_by_group(rows, group_key="clip")
+    members = {n: {r["clip"] for r in rs} for n, rs in splits.items()}
+    assert members["train"] & members["test"] == set()
+    assert members["train"] & members["val"] == set()
+    assert members["val"] & members["test"] == set()

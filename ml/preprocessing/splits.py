@@ -25,13 +25,20 @@ def load_manifest(path: str) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
-def split_by_subject(
+def split_by_group(
     rows: list[dict],
     train_frac: float = 0.6,
     val_frac: float = 0.2,
     seed: int = 42,
+    group_key: str = "subject",
+    stratify: bool = True,
 ) -> dict[str, list[dict]]:
-    """Partition clips into train/val/test by subject.
+    """Partition clips into train/val/test by group.
+
+    `group_key` selects the grouping unit. 'subject' is correct whenever the dataset
+    exposes person identifiers. When it does not (see docs/02-dataset.md), 'clip'
+    groups by source video instead: weaker, because a person may span splits, but it
+    still prevents near-duplicate frames from one video landing on both sides.
 
     Subjects are shuffled with a fixed seed, then assigned by proportion of subjects
     (not of clips). Clip counts per split will therefore be uneven — that is correct
@@ -39,55 +46,77 @@ def split_by_subject(
     """
     by_subject: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
-        by_subject[r["subject"]].append(r)
+        by_subject[r[group_key]].append(r)
 
     subjects = sorted(by_subject)
     random.Random(seed).shuffle(subjects)
 
-    n = len(subjects)
-    n_train = int(n * train_frac)
-    n_val = int(n * val_frac)
-    if n_train == 0 or n_val == 0 or n - n_train - n_val == 0:
-        raise ValueError(
-            f"only {n} subjects — too few to split without an empty partition. "
-            "Use a dataset with more subjects, or group by recording session instead."
-        )
+    # Stratify by label so every split contains both classes. Without this, a random
+    # group assignment can hand a split zero live samples, which makes BPCER
+    # undefined and the split useless. Each group has a single label, so grouping
+    # integrity is preserved: we partition within each label independently.
+    if stratify:
+        label_of = {g: by_subject[g][0].get("label", "?") for g in subjects}
+        buckets: dict[str, list[str]] = defaultdict(list)
+        for g in subjects:
+            buckets[label_of[g]].append(g)
+        strata = list(buckets.values())
+    else:
+        strata = [subjects]
 
-    groups = {
-        "train": subjects[:n_train],
-        "val": subjects[n_train:n_train + n_val],
-        "test": subjects[n_train + n_val:],
-    }
+    groups: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for stratum in strata:
+        n = len(stratum)
+        n_train = int(n * train_frac)
+        n_val = int(n * val_frac)
+        if n_train == 0 or n_val == 0 or n - n_train - n_val == 0:
+            raise ValueError(
+                f"only {n} {group_key} groups in one label stratum — too few to split "
+                "without an empty partition. Use more data, or a finer grouping key."
+            )
+        groups["train"] += stratum[:n_train]
+        groups["val"] += stratum[n_train:n_train + n_val]
+        groups["test"] += stratum[n_train + n_val:]
     splits = {k: [r for s in subs for r in by_subject[s]] for k, subs in groups.items()}
-    assert_no_leakage(splits)
+    assert_no_leakage(splits, group_key=group_key)
     return splits
 
 
-def assert_no_leakage(splits: dict[str, list[dict]]) -> None:
-    """Fail loudly if any subject appears in two splits."""
+def split_by_subject(rows, train_frac=0.6, val_frac=0.2, seed=42):
+    """Subject-grouped split. Preferred when the dataset has person identifiers."""
+    return split_by_group(rows, train_frac, val_frac, seed, group_key="subject")
+
+
+def assert_no_leakage(splits: dict[str, list[dict]], group_key: str = "subject") -> None:
+    """Fail loudly if any group appears in two splits."""
     seen: dict[str, str] = {}
     for name, rows in splits.items():
         for r in rows:
-            subj = r["subject"]
+            subj = r[group_key]
             prev = seen.setdefault(subj, name)
             if prev != name:
                 raise LeakageError(
-                    f"subject {subj!r} appears in both {prev!r} and {name!r} — "
+                    f"{group_key} {subj!r} appears in both {prev!r} and {name!r} — "
                     "splits are leaking and any metrics computed from them are invalid"
                 )
 
 
 def summarise(splits: dict[str, list[dict]]) -> str:
     """Human-readable split summary. Print this into the report; reviewers look for it."""
-    lines = [f"{'split':<8}{'subjects':>10}{'clips':>8}{'live':>8}{'spoof':>8}"]
+def summarise_by(splits: dict[str, list[dict]], group_key: str = "subject") -> str:
+    lines = [f"{'split':<8}{'groups':>10}{'clips':>8}{'live':>8}{'spoof':>8}"]
     for name in ("train", "val", "test"):
         rows = splits.get(name, [])
-        subs = {r["subject"] for r in rows}
+        subs = {r[group_key] for r in rows}
         live = sum(1 for r in rows if r["label"] == "live")
         lines.append(
             f"{name:<8}{len(subs):>10}{len(rows):>8}{live:>8}{len(rows) - live:>8}"
         )
     return "\n".join(lines)
+
+
+def summarise(splits: dict[str, list[dict]]) -> str:
+    return summarise_by(splits, group_key="subject")
 
 
 def write_splits(splits: dict[str, list[dict]], out_dir: str) -> None:
