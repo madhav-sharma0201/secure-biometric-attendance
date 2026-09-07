@@ -86,8 +86,13 @@ def deserialize(b: bytes, dim: int) -> np.ndarray:
 class RecognitionService:
     """Wraps InsightFace. Loaded lazily so importing this module stays cheap."""
 
-    def __init__(self, model_name: str = "buffalo_l", ctx_id: int = -1, det_size: int = 640):
-        self.model_name, self.ctx_id, self.det_size = model_name, ctx_id, det_size
+    def __init__(self, model_name: str = "buffalo_l", ctx_id: int = -1,
+                 det_size: int | None = None):
+        from ml.preprocessing.face_processor import PREPROCESSING
+
+        self.model_name, self.ctx_id = model_name, ctx_id
+        # Shared config, so detection here matches the training preprocessing.
+        self.det_size = det_size if det_size is not None else PREPROCESSING["det_size"]
         self._app = None
 
     @property
@@ -97,7 +102,13 @@ class RecognitionService:
     def _ensure_loaded(self):
         if self._app is None:
             from insightface.app import FaceAnalysis
-            app = FaceAnalysis(name=self.model_name)
+
+            # Load ONLY detection and recognition. FaceAnalysis otherwise also runs
+            # 2D and 3D landmark models and a gender/age classifier on every image —
+            # none of which this system uses, all of which cost inference time.
+            # Measured: enrolment of 4 images took 25.8 s with the full set.
+            app = FaceAnalysis(name=self.model_name,
+                               allowed_modules=["detection", "recognition"])
             app.prepare(ctx_id=self.ctx_id, det_size=(self.det_size, self.det_size))
             self._app = app
         return self._app
