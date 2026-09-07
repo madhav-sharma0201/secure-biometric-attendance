@@ -3,9 +3,9 @@
 A trained CNN-LSTM face anti-spoofing model integrated with ArcFace identity
 verification, deployed as containerised services on Kubernetes.
 
-> **Status: in progress.** Every number in this README is measured. Sections awaiting a
-> completed training run are marked `PENDING` rather than filled with plausible
-> placeholders.
+> Every number in this README is measured. Nothing is estimated or illustrative.
+> The failed first training run is kept in `docs/results/` rather than deleted,
+> because its failure is the most instructive result the project produced.
 
 ---
 
@@ -181,14 +181,77 @@ support.
 
 ### Results
 
-`PENDING` — training run in progress.
+Pooled corpus: **439 clips, 151 live, 288 spoof, 162 subjects** across four sources.
+Subject-grouped split: 97 / 32 / 33 subjects (261 / 68 / 110 clips).
+Threshold selected on validation (min-ACER); test scored once.
 
-| Model | Test ACER | APCER | BPCER | ROC-AUC |
-|---|---|---|---|---|
-| A single-frame CNN | PENDING | PENDING | PENDING | PENDING |
-| B CNN + BiLSTM | PENDING | PENDING | PENDING | PENDING |
+| Model | Test ACER | APCER | BPCER | ROC-AUC | Threshold |
+|---|---:|---:|---:|---:|---:|
+| **A single-frame CNN** | **9.74%** | 10.39% | **9.09%** | **0.951** | 0.4535 |
+| B CNN + BiLSTM | 15.15% | 9.09% | 21.21% | 0.911 | 0.8759 |
 
-Per-attack and external-set results: `PENDING`.
+95% CI (Model A): APCER [5.4, 19.2], BPCER [3.1, 23.6]. 33 live / 77 spoof test clips.
+
+**Model A is deployed.** ONNX, 3.7 MB, max |onnx - torch| = 9.06e-06.
+
+### Per-attack APCER — the number that matters
+
+| Attack | A | B |
+|---|---:|---:|
+| display_photo_lightroom | **50.0%** | 100.0% |
+| replay_phone | **35.7%** | 14.3% |
+| mask_static_printedglasses | 28.6% | 14.3% |
+| display_photo_nightlight | 0.0% | 100.0% |
+| display_replay | 0.0% | 0.0% |
+| mask_handheld (4 variants) | 0.0% | 0.0-14.3% |
+| mask_static (3 other variants) | 0.0% | 0.0% |
+
+**Worst-case APCER is 50%, against a pooled figure of 10.39%.** This is exactly why
+ISO/IEC 30107-3 reports the worst attack species rather than the average: the system
+blocks every printed-mask attack but accepts half of the photos displayed on a lit
+screen. An attacker uses the attack that works.
+
+### Ablation — and why the aggregate winner is misleading
+
+Model A wins overall (9.74% vs 15.15% ACER), so the single-frame baseline is deployed
+and the temporal model is not justified on this data.
+
+But the aggregate hides the interesting part. Model B is **twice as good on the two
+attacks that matter most for proxy attendance** — phone replay (14.3% vs 35.7%) and
+printed-glasses masks (14.3% vs 28.6%). It loses because it fails completely on photos
+displayed on screens (100% APCER on two display categories). "The single-frame CNN is
+better" is true on aggregate and misleading against the actual threat model.
+
+The original hypothesis — that temporal cues would help specifically on **hand-held**
+masks, which jitter, versus mounted ones — was **not confirmed**: APCER was 0% on
+hand-held and static variants alike for Model A. Attack detection on masks was never
+the failure mode. That prediction is recorded as falsified rather than quietly dropped.
+
+### Run 1: what failure taught us
+
+The first run trained on the primary dataset alone and is documented in
+`docs/results/liveness-run1-single-source.md`.
+
+| | Run 1 (single source) | Run 2 (pooled) |
+|---|---:|---:|
+| Validation ACER | 0.00% | 12.92% |
+| Test ACER | 31.25% | **9.74%** |
+| **Test BPCER** | **60.00%** | **9.09%** |
+| Live training clips | 24 | 91 |
+| Subjects | 21 | 162 |
+
+Run 1 reported **0.00% validation ACER and 60% test BPCER** — it rejected three in five
+genuine users. Two independent causes:
+
+1. **24 live clips from 12 people.** The model learned those twelve faces as "live" and
+   called everything else a spoof.
+2. **A threshold with zero margin.** Threshold candidates were only the *observed*
+   scores, so on well-separated validation data the best threshold **is** the lowest
+   live score, leaving no margin beneath it. Unseen live faces scoring fractionally
+   lower were rejected. Candidates are now midpoints between consecutive scores.
+
+A validation ACER that is *too good* was the signal. Had the frames been split randomly
+instead of by subject, this project would be reporting ~0% ACER and it would be fiction.
 
 ## 8. Backend
 
@@ -219,10 +282,35 @@ Kubernetes (`kind`): Deployments, StatefulSet + PVCs, ConfigMap, Secret, Ingress
 resource requests and limits on every pod.
 
 **`/health` and `/ready` are different endpoints on purpose.** `/health` reports process
-liveness and never touches the database. `/ready` checks the database and returns 503 if
-it is unreachable — a pod whose DB is down is alive but must not receive traffic. A
-`startupProbe` with `failureThreshold: 30` covers model loading, which otherwise gets
-the pod killed mid-load in a crash loop that looks like a broken image.
+liveness and never touches the database. `/ready` checks the database **and that both
+models loaded**, returning 503 otherwise — a pod that is alive but cannot verify anyone
+must not receive verification traffic. Models load eagerly at startup; the
+`startupProbe` (`failureThreshold: 30`) covers that window.
+
+**ArcFace weights are baked into the image.** InsightFace otherwise downloads ~300 MB
+from GitHub on every pod start: slow rollouts, a hard runtime dependency on an external
+host, and startup that exceeded the probe budget (a pod restarted mid-download, which is
+how this was found).
+
+**`OMP_NUM_THREADS` is pinned to the CPU limit.** ONNX Runtime sizes its thread pool
+from the *node's* visible CPU count, not the cgroup quota, so a 1-CPU pod ran 8 threads
+over one core and thrashed. Pinning threads and doubling the limit took end-to-end
+verification from 7203 ms to 3146 ms.
+
+### Measured inference latency
+
+| Stage | P50 |
+|---|---:|
+| Liveness model (8 frames, host CPU) | 5.45 ms |
+| Face detection, det_size 640 (host) | 107.23 ms |
+| Face detection, det_size 320 (host) | 23.85 ms |
+| **End-to-end `/verify`, deployed pod** | **3146 ms (P95 3604 ms)** |
+
+**The trained model is not the bottleneck** — face detection is, by roughly 20x. NFR-1
+targeted P95 < 2 s; the deployed system is at **3.6 s and does not meet it**. Options
+are measured and listed in `docs/results/inference-latency.md`; none were applied
+silently, because each trades against either the evaluated operating point or hardware
+that is not available.
 
 ### Measured replica scaling
 
@@ -257,12 +345,15 @@ throughput will be dominated by inference latency, measured separately.
 
 ## 11. Limitations
 
-- **21 training subjects, 5 test subjects.** Small. Confidence intervals are wide and
-  are reported as such.
-- **Single vendor, single capture pipeline** for the primary data. Generalisation is
-  measured only by the external sets.
-- **No replay attack in training** — replay is evaluated strictly as an unseen attack
-  type, which is harder and more honest than training on it.
+- **162 subjects, 33 in test.** Better than run 1's 21/5, still small. Confidence
+  intervals are reported alongside every rate.
+- **Worst-case APCER is 50%** on photos shown on a lit screen. The system is not
+  deployable against that attack without further work.
+- **P95 latency is 3.6 s against a 2 s target.** Not met.
+- **All four sources are from one vendor.** Generalisation beyond that vendor's capture
+  pipeline is unmeasured; run 1's cross-dataset numbers (38-61% ACER) suggest it is poor.
+- **Pooled training means no fully held-out dataset** in run 2. Cross-dataset
+  generalisation is measured only by run 1.
 - **No 3D mask or deepfake coverage.** Out of scope, and absent from the training data.
 - **Single-node Kubernetes.** Scaling figures do not extrapolate to a multi-node cluster.
 - **No demographic fairness audit.** Public FAS datasets are demographically narrow.
@@ -302,7 +393,12 @@ kubectl apply -f kubernetes/
 ```
 
 Training runs on Kaggle (see `notebooks/train_liveness.ipynb`); this machine has no
-CUDA GPU.
+CUDA GPU. The notebook falls back to CPU automatically when the assigned GPU's compute
+capability is unsupported by the installed PyTorch (Kaggle's P100 is sm_60; their torch
+build requires sm_70+).
+
+Place `models/liveness.onnx` and `models/liveness_meta.json` from the training run into
+`models/` before starting the stack; the threshold is read from the metadata file.
 
 ## 13. Documents
 
@@ -311,3 +407,6 @@ CUDA GPU.
 - `docs/02-dataset.md` — dataset selection and split strategy
 - `docs/03-recording-protocol.md` — self-collected data protocol
 - `docs/results/load-test.md` — Kubernetes scaling measurements
+- `docs/results/inference-latency.md` — per-stage and deployed latency
+- `docs/results/liveness-run1-single-source.md` — the failed first run and its diagnosis
+- `docs/results/liveness_modelA_cnn.json`, `liveness_modelB_cnnlstm.json` — full reports
