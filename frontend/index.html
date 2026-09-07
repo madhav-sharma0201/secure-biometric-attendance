@@ -75,11 +75,23 @@
 </div>
 
 <script>
-const API = localStorage.getItem("api") || "http://localhost:8000";
+// Default to the relative /api path, which nginx proxies to the backend service.
+// An absolute default (http://localhost:8000) is unreachable from a browser loading
+// this page from inside the cluster, and would also be a cross-origin request.
+// Override for local development that bypasses nginx:
+//   localStorage.setItem("api", "http://localhost:8000")
+const API = localStorage.getItem("api") || "/api";
+
+// The kiosk's API key. Provisioned once per device:
+//   localStorage.setItem("apiKey", "<key>")
+// Kept out of the page source deliberately — a key baked into a static asset served
+// to every visitor is not a key.
+const API_KEY = localStorage.getItem("apiKey") || "";
+
 const N_FRAMES = 8, FRAME_INTERVAL_MS = 120;
 
 const $ = id => document.getElementById(id);
-$("apiLabel").textContent = API;
+$("apiLabel").textContent = API + (API_KEY ? " (key set)" : " — NO API KEY SET");
 
 let stream = null;
 
@@ -97,6 +109,8 @@ const MESSAGES = {
   NO_OPEN_SESSION: ["No open session", "There is no attendance session running right now."],
   USER_INACTIVE: ["Account inactive", "Contact your administrator."],
   SYSTEM_ERROR: ["System error", "Something went wrong. Try again."],
+  UNAUTHORIZED: ["Device not authorised", "This kiosk has no valid API key configured."],
+  RATE_LIMITED: ["Too many attempts", "Please wait a moment before trying again."],
 };
 
 function setStatus(text, kind) {
@@ -150,7 +164,16 @@ async function verify() {
   frames.forEach((b, i) => fd.append("frames", b, `f${i}.jpg`));
 
   try {
-    const res = await fetch(API + "/verify", { method: "POST", body: fd });
+    const headers = API_KEY ? { "X-API-Key": API_KEY } : {};
+    const res = await fetch(API + "/verify", { method: "POST", body: fd, headers });
+    if (res.status === 401 || res.status === 503) {
+      show({ decision: "rejected", reason: "UNAUTHORIZED" });
+      return;
+    }
+    if (res.status === 429) {
+      show({ decision: "rejected", reason: "RATE_LIMITED" });
+      return;
+    }
     show(await res.json());
   } catch (e) {
     show({ decision: "rejected", reason: "SYSTEM_ERROR", _detail: e.message });
