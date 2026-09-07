@@ -102,6 +102,27 @@ class RecognitionService:
             self._app = app
         return self._app
 
+    def embed_crop(self, crop_rgb: np.ndarray) -> np.ndarray:
+        """Embed an ALREADY aligned 112x112 crop, skipping detection.
+
+        The verification path has already run detection and ArcFace alignment to score
+        liveness. Calling `embed()` there would run the detector a second time on the
+        full frame — measured at ~107 ms, against ~10 ms for the embedding itself.
+        Reusing the existing crop removes that duplicate work.
+
+        The crop must come from the same alignment (`face_align.norm_crop`) the
+        recognition model was trained with; passing an arbitrary face image here would
+        produce a valid-looking but wrong embedding.
+        """
+        import cv2
+
+        app = self._ensure_loaded()
+        rec = app.models.get("recognition")
+        if rec is None:
+            raise RuntimeError("recognition model not loaded")
+        crop_bgr = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2BGR)
+        return l2_normalize(rec.get_feat(crop_bgr).flatten().astype(np.float32))
+
     def embed(self, image_bgr: np.ndarray) -> tuple[np.ndarray | None, int]:
         """Returns (embedding, n_faces). Embedding is None unless exactly one face.
 

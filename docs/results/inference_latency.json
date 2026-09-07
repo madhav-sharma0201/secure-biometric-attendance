@@ -1,0 +1,41 @@
+{
+  "hardware": {
+    "platform": "macOS-15.7.7-x86_64-i386-64bit",
+    "processor": "i386"
+  },
+  "stages": [
+    {
+      "stage": "liveness (8 frames)",
+      "n": 20,
+      "mean_ms": 5.4,
+      "p50_ms": 5.45,
+      "p95_ms": 6.0,
+      "p99_ms": 6.13,
+      "min_ms": 4.74,
+      "max_ms": 6.16,
+      "note": "UNTRAINED model of the same architecture \u2014 latency is weight-independent, but this is not a trained model"
+    },
+    {
+      "stage": "face detection (1280x720)",
+      "n": 20,
+      "mean_ms": 103.61,
+      "p50_ms": 107.23,
+      "p95_ms": 126.2,
+      "p99_ms": 145.33,
+      "min_ms": 75.41,
+      "max_ms": 150.11,
+      "note": "SCRFD via InsightFace, CPU"
+    },
+    {
+      "stage": "face embedding (ArcFace)",
+      "n": 20,
+      "mean_ms": 119.2,
+      "p50_ms": 117.18,
+      "p95_ms": 152.18,
+      "p99_ms": 191.94,
+      "min_ms": 90.23,
+      "max_ms": 201.88,
+      "note": "includes detection; subtract the detection row"
+    }
+  ]
+}
