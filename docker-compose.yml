@@ -13,7 +13,11 @@ services:
       timeout: 3s
       retries: 10
     ports:
-      - "5432:5432"
+      # Host port is configurable and does NOT default to 5432: a developer machine
+      # very often already runs Postgres there, and the stack does not need this
+      # mapping at all — the backend reaches Postgres over the compose network.
+      # Exposed only for inspecting the database from the host.
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
 
   backend:
     build:
@@ -25,6 +29,10 @@ services:
       LIVENESS_THRESHOLD: ${LIVENESS_THRESHOLD:-0.5}
       FACE_MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.5}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Without this the backend refuses authenticated routes with 503 rather than
+      # serving them openly — which is the intended behaviour, and is how this
+      # omission was found.
+      API_KEY: ${API_KEY:?set API_KEY in .env}
     volumes:
       # Models are mounted, not baked in. Retraining swaps the file; no rebuild.
       - ./models:/app/models
@@ -32,7 +40,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${BACKEND_HOST_PORT:-8000}:8000"
 
   frontend:
     build:
@@ -40,7 +48,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8080:8080"
+      - "${FRONTEND_HOST_PORT:-8080}:8080"
 
 volumes:
   pgdata:
