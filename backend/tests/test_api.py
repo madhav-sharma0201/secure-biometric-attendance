@@ -1,0 +1,238 @@
+"""API integration tests against a real SQLite database with stubbed ML services.
+
+Stubbing the models rather than mocking the services keeps the ACTUAL orchestration,
+decision engine, persistence and constraint behaviour under test — only the two
+learned components are replaced, and they are the only parts these tests are not
+about.
+"""
+import datetime as dt
+
+import cv2
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+
+from backend.app.core.decision import Thresholds
+from backend.app.models.db import Base
+from backend.app.services.recognition import l2_normalize
+from backend.app.services.verification import VerificationService
+
+RNG = np.random.default_rng(7)
+DIM = 128
+
+
+class StubFace:
+    def __init__(self, crop):
+        self.crop = crop
+        self.bbox = np.array([0, 0, 112, 112])
+        self.det_score = 0.99
+
+
+class StubFaceProcessor:
+    """Reads the number of faces and the identity from pixel values in the fixture.
+
+    Blue channel mean encodes the face count; red channel mean encodes which person.
+    That keeps the tests deterministic and free of real imagery.
+    """
+    image_size = 112
+
+    def detect_all(self, img):
+        n = int(round(img[:, :, 0].mean() / 40.0))
+        crop = np.zeros((112, 112, 3), dtype=np.uint8)
+        crop[:, :, 2] = int(img[:, :, 2].mean())
+        return [StubFace(crop) for _ in range(n)]
+
+
+class StubLiveness:
+    model_version = "stub-v1"
+
+    def __init__(self, score=0.99):
+        self.score_value = score
+        self._sess = object()
+
+    def score(self, crops):
+        return self.score_value
+
+
+class StubRecognition:
+    model_version = "stub-arcface"
+
+    def __init__(self):
+        self._app = object()
+
+    def _vec(self, person_id: int):
+        return l2_normalize(np.default_rng if False else
+                            np.random.default_rng(person_id).normal(size=DIM).astype(np.float32))
+
+    def embed(self, img):
+        n = int(round(img[:, :, 0].mean() / 40.0))
+        if n != 1:
+            return None, n
+        return self._vec(int(round(img[:, :, 2].mean()))), 1
+
+
+def make_image(n_faces=1, person=5):
+    img = np.zeros((240, 240, 3), dtype=np.uint8)
+    img[:, :, 0] = n_faces * 40
+    img[:, :, 2] = person
+    return cv2.imencode(".jpg", img)[1].tobytes()
+
+
+@pytest.fixture()
+def client(tmp_path):
+    from backend.app import main as main_mod
+    from backend.app.core import db as db_mod
+
+    engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+
+    @event.listens_for(engine, "connect")
+    def _fk(conn, _r):
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    TestSession = sessionmaker(bind=engine, expire_on_commit=False)
+
+    db_mod.set_engine(engine)
+
+    def override_db():
+        s = TestSession()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app = main_mod.app
+    app.dependency_overrides[db_mod.get_db] = override_db
+
+    with TestClient(app) as c:
+        # Installed AFTER startup: the lifespan builds the real services, so stubs
+        # set before entering the context would simply be overwritten.
+        faces, liveness, recog = StubFaceProcessor(), StubLiveness(), StubRecognition()
+        app.state.services = main_mod.Services(
+            faces=faces, liveness=liveness, recognition=recog,
+            verification=VerificationService(faces, liveness, recog,
+                                             Thresholds(liveness=0.8, identity=0.5)),
+        )
+        c.app_services = app.state.services
+        yield c
+    app.dependency_overrides.clear()
+
+
+def _enroll(client, person=5, student_id="S1", email="a@b.c"):
+    u = client.post("/users", json={"student_id": student_id, "name": "T",
+                                    "email": email}).json()
+    files = [("images", (f"{i}.jpg", make_image(1, person), "image/jpeg")) for i in range(3)]
+    r = client.post("/enrollment", data={"user_id": u["id"]}, files=files)
+    assert r.status_code == 200, r.text
+    return u
+
+
+def _open_session(client):
+    now = dt.datetime.now(dt.timezone.utc)
+    r = client.post("/sessions", json={
+        "name": "Lecture",
+        "start_time": (now - dt.timedelta(minutes=5)).isoformat(),
+        "end_time": (now + dt.timedelta(hours=1)).isoformat()})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_health_and_ready(client):
+    assert client.get("/health").json()["status"] == "ok"
+    assert client.get("/ready").json()["ready"] is True
+
+
+def test_user_creation_rejects_duplicates(client):
+    body = {"student_id": "S1", "name": "T", "email": "a@b.c"}
+    assert client.post("/users", json=body).status_code == 201
+    assert client.post("/users", json=body).status_code == 409
+
+
+def test_enrollment_requires_at_least_three_usable_images(client):
+    u = client.post("/users", json={"student_id": "S2", "name": "T",
+                                    "email": "b@b.c"}).json()
+    files = [("images", ("0.jpg", make_image(1, 5), "image/jpeg"))]
+    r = client.post("/enrollment", data={"user_id": u["id"]}, files=files)
+    assert r.status_code == 422 and "at least 3" in r.text
+
+
+def test_enrollment_rejects_images_with_multiple_faces(client):
+    u = client.post("/users", json={"student_id": "S3", "name": "T",
+                                    "email": "c@b.c"}).json()
+    files = [("images", (f"{i}.jpg", make_image(2, 5), "image/jpeg")) for i in range(4)]
+    r = client.post("/enrollment", data={"user_id": u["id"]}, files=files)
+    assert r.status_code == 422
+
+
+def test_full_approval_path_marks_attendance(client):
+    u = _enroll(client)
+    s = _open_session(client)
+    frames = [("frames", (f"{i}.jpg", make_image(1, 5), "image/jpeg")) for i in range(4)]
+    r = client.post("/verify", data={"session_id": s["id"]}, files=frames).json()
+    assert r["decision"] == "approved", r
+    assert r["user_id"] == u["id"]
+    assert r["attendance_id"]
+    assert len(client.get("/attendance").json()) == 1
+
+
+def test_second_attempt_is_rejected_as_already_marked(client):
+    _enroll(client)
+    s = _open_session(client)
+    frames = lambda: [("frames", (f"{i}.jpg", make_image(1, 5), "image/jpeg")) for i in range(4)]
+    assert client.post("/verify", data={"session_id": s["id"]}, files=frames()).json()["decision"] == "approved"
+    second = client.post("/verify", data={"session_id": s["id"]}, files=frames()).json()
+    assert second["decision"] == "rejected"
+    assert second["reason"] == "ALREADY_MARKED"
+    assert len(client.get("/attendance").json()) == 1
+
+
+def test_spoof_is_rejected_and_no_attendance_recorded(client):
+    _enroll(client)
+    s = _open_session(client)
+    client.app_services.liveness.score_value = 0.05
+    frames = [("frames", (f"{i}.jpg", make_image(1, 5), "image/jpeg")) for i in range(4)]
+    r = client.post("/verify", data={"session_id": s["id"]}, files=frames).json()
+    assert r["decision"] == "rejected" and r["reason"] == "LIVENESS_FAILED"
+    assert r.get("user_id") is None
+    assert client.get("/attendance").json() == []
+
+
+def test_multiple_faces_rejected(client):
+    _enroll(client)
+    s = _open_session(client)
+    frames = [("frames", (f"{i}.jpg", make_image(2, 5), "image/jpeg")) for i in range(4)]
+    r = client.post("/verify", data={"session_id": s["id"]}, files=frames).json()
+    assert r["reason"] == "MULTIPLE_FACES"
+
+
+def test_unenrolled_person_is_rejected(client):
+    _enroll(client, person=5)
+    s = _open_session(client)
+    frames = [("frames", (f"{i}.jpg", make_image(1, 200), "image/jpeg")) for i in range(4)]
+    r = client.post("/verify", data={"session_id": s["id"]}, files=frames).json()
+    assert r["decision"] == "rejected"
+    assert r["reason"] in ("UNKNOWN_PERSON", "LOW_IDENTITY_CONFIDENCE")
+
+
+def test_verification_outside_an_open_session_is_rejected(client):
+    _enroll(client)
+    now = dt.datetime.now(dt.timezone.utc)
+    client.post("/sessions", json={"name": "Past",
+                                   "start_time": (now - dt.timedelta(days=1)).isoformat(),
+                                   "end_time": (now - dt.timedelta(hours=23)).isoformat()})
+    frames = [("frames", (f"{i}.jpg", make_image(1, 5), "image/jpeg")) for i in range(4)]
+    r = client.post("/verify", files=frames).json()
+    assert r["reason"] == "NO_OPEN_SESSION"
+
+
+def test_biometric_deletion_preserves_attendance(client):
+    u = _enroll(client)
+    s = _open_session(client)
+    frames = [("frames", (f"{i}.jpg", make_image(1, 5), "image/jpeg")) for i in range(4)]
+    client.post("/verify", data={"session_id": s["id"]}, files=frames)
+
+    r = client.delete(f"/users/{u['id']}/biometrics").json()
+    assert r["embeddings_deleted"] == 1
+    assert len(client.get("/attendance").json()) == 1     # audit trail survives
