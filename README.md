@@ -397,8 +397,15 @@ CUDA GPU. The notebook falls back to CPU automatically when the assigned GPU's c
 capability is unsupported by the installed PyTorch (Kaggle's P100 is sm_60; their torch
 build requires sm_70+).
 
-Place `models/liveness.onnx` and `models/liveness_meta.json` from the training run into
-`models/` before starting the stack; the threshold is read from the metadata file.
+The trained model is published as a release artifact rather than committed:
+
+```bash
+gh release download v1.0.0 --dir models/
+# or download liveness.onnx + liveness_meta.json from the Releases page
+```
+
+The decision threshold is read from `liveness_meta.json`, so it always travels with the
+model that produced it.
 
 ## 13. Documents
 
