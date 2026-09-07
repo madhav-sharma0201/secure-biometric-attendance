@@ -116,3 +116,24 @@ def test_stratification_still_respects_group_boundaries():
     assert members["train"] & members["test"] == set()
     assert members["train"] & members["val"] == set()
     assert members["val"] & members["test"] == set()
+
+
+def test_mixed_label_groups_skip_stratification_and_still_split_cleanly():
+    """Subject grouping: each subject has both live and spoof clips.
+
+    Stratifying on 'the subject's label' would be meaningless. The split must still
+    keep each subject whole and give every split both classes.
+    """
+    from ml.preprocessing.splits import split_by_group
+    rows = [
+        {"subject": f"p{p}", "clip": f"p{p}_t{t}",
+         "label": "live" if t in (1, 2) else "spoof", "attack_type": f"type_{t}"}
+        for p in range(15) for t in range(1, 11)
+    ]
+    splits = split_by_group(rows, group_key="subject")
+    members = {n: {r["subject"] for r in rs} for n, rs in splits.items()}
+    assert members["train"] & members["test"] == set()
+    assert members["train"] & members["val"] == set()
+    assert members["val"] & members["test"] == set()
+    for name, rs in splits.items():
+        assert {r["label"] for r in rs} == {"live", "spoof"}, f"{name} missing a class"

@@ -55,11 +55,18 @@ def split_by_group(
     # group assignment can hand a split zero live samples, which makes BPCER
     # undefined and the split useless. Each group has a single label, so grouping
     # integrity is preserved: we partition within each label independently.
-    if stratify:
-        label_of = {g: by_subject[g][0].get("label", "?") for g in subjects}
+    # Stratification only makes sense when a group carries a single label. Under
+    # subject grouping each subject usually has BOTH live and spoof clips, so there is
+    # no single label to stratify on — and bucketing a subject by whichever row came
+    # first would be arbitrary. Detect that case and skip stratification: mixed-label
+    # groups already guarantee both classes land in every split.
+    labels_per_group = {g: {r.get("label", "?") for r in by_subject[g]} for g in subjects}
+    mixed = any(len(v) > 1 for v in labels_per_group.values())
+
+    if stratify and not mixed:
         buckets: dict[str, list[str]] = defaultdict(list)
         for g in subjects:
-            buckets[label_of[g]].append(g)
+            buckets[next(iter(labels_per_group[g]))].append(g)
         strata = list(buckets.values())
     else:
         strata = [subjects]
