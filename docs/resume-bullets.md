@@ -22,7 +22,7 @@ attacks (14.3% vs 35.7%), and shipped the model the evidence supported.**
 
 **Built a fail-closed biometric verification service (FastAPI, PostgreSQL, ONNX Runtime,
 ArcFace) with the decision engine as a pure function, verified by a brute-force sweep of
-1,152 input combinations plus database-level duplicate-attendance constraints.**
+576 input combinations plus database-level duplicate-attendance constraints.**
 <sub>backend/app/core/decision.py, backend/tests/ — 91 tests.</sub>
 
 **Deployed to Kubernetes and measured replica scaling over 3 trials per configuration:
@@ -45,7 +45,7 @@ after profiling showed face detection — not the trained model (5.45 ms) — do
 - Diagnosed a generalisation failure and **cut BPCER from 60% to 9.1%**, tracing it to a
   zero-margin threshold-selection bug and insufficient live-subject diversity.
 - Built a fail-closed FastAPI + PostgreSQL + ONNX verification service with the decision
-  engine as a pure function, **91 tests** including a 1,152-combination safety sweep.
+  engine as a pure function, **91 tests** including a 576-combination safety sweep.
 - Deployed on Kubernetes and measured scaling across 3 trials/config
   (**55.6 / 171.6 / 194.6 req/s** at 1/2/4 replicas), plus a **2.3x** latency reduction
   from fixing container thread contention.
