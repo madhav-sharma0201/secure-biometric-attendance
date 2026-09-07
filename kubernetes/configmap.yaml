@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: attendance-config
+  namespace: attendance
+data:
+  # Thresholds are experimental results, not constants. They are set here so the
+  # deployed operating point is visible and auditable without rebuilding an image,
+  # and so it can be traced back to the training run that produced it.
+  LIVENESS_THRESHOLD: "0.50"
+  FACE_MATCH_THRESHOLD: "0.50"
+  LIVENESS_UNCERTAIN_BAND: "0.10"
+  LIVENESS_MODEL_PATH: "/app/models/liveness.onnx"
+  LIVENESS_MODEL_VERSION: "pending-training-run"
+  RECOGNITION_MODEL_VERSION: "buffalo_l"
+  SEQUENCE_LENGTH: "8"
+  IMAGE_SIZE: "112"
+  LOG_LEVEL: "INFO"
+  POSTGRES_DB: "attendance"
+  POSTGRES_USER: "attendance"

@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance — Verify</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --text:#e8eaed;
+    --muted:#9aa3b2; --ok:#2ea36a; --warn:#c9922b; --err:#d1495b; --accent:#4a7cff;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; }
+  .app { width:100%; max-width:560px; }
+  h1 { font-size:19px; margin:0 0 4px; font-weight:600; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 18px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+           overflow:hidden; }
+  .stage { position:relative; aspect-ratio:4/3; background:#000; }
+  video, canvas.overlay { position:absolute; inset:0; width:100%; height:100%; }
+  video { object-fit:cover; transform:scaleX(-1); }
+  .status { display:flex; align-items:center; gap:10px; padding:14px 16px;
+            border-top:1px solid var(--line); font-size:14px; min-height:52px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); flex:0 0 auto; }
+  .dot.busy { background:var(--accent); animation:pulse 1s ease-in-out infinite; }
+  .dot.ok { background:var(--ok); } .dot.err { background:var(--err); }
+  .dot.warn { background:var(--warn); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .controls { display:flex; gap:10px; padding:0 16px 16px; }
+  button { flex:1; padding:11px 14px; border-radius:9px; border:1px solid var(--line);
+           background:#20242d; color:var(--text); font-size:14px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff;
+                   font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .result { margin-top:14px; padding:14px 16px; border-radius:10px; display:none;
+            border:1px solid var(--line); background:var(--panel); }
+  .result.show { display:block; }
+  .result.approved { border-color:var(--ok); }
+  .result.rejected { border-color:var(--err); }
+  .rname { font-size:17px; font-weight:600; margin-bottom:8px; }
+  .scores { display:flex; gap:20px; font-size:13px; color:var(--muted); }
+  .scores b { color:var(--text); font-variant-numeric:tabular-nums; }
+  .hint { font-size:12px; color:var(--muted); margin-top:12px; }
+  code { background:#20242d; padding:1px 5px; border-radius:4px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Attendance verification</h1>
+  <p class="sub">Look at the camera. Capture takes about one second.</p>
+
+  <div class="panel">
+    <div class="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay" class="overlay"></canvas>
+    </div>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Camera not started</span>
+    </div>
+    <div class="controls">
+      <button id="startBtn">Start camera</button>
+      <button id="verifyBtn" class="primary" disabled>Verify</button>
+    </div>
+  </div>
+
+  <div class="result" id="result">
+    <div class="rname" id="rname"></div>
+    <div class="scores" id="rscores"></div>
+  </div>
+
+  <p class="hint">Backend: <code id="apiLabel"></code></p>
+</div>
+
+<script>
+const API = localStorage.getItem("api") || "http://localhost:8000";
+const N_FRAMES = 8, FRAME_INTERVAL_MS = 120;
+
+const $ = id => document.getElementById(id);
+$("apiLabel").textContent = API;
+
+let stream = null;
+
+// Rejection codes are mapped to messages a student can act on. The raw code is kept
+// visible too, because "LOW_LIVENESS_CONFIDENCE" is what appears in the logs and
+// support conversations get much easier when both are shown.
+const MESSAGES = {
+  NO_FACE: ["No face detected", "Move into frame and make sure the area is lit."],
+  MULTIPLE_FACES: ["More than one face detected", "Only one person may be in frame."],
+  LIVENESS_FAILED: ["Liveness check failed", "This looks like a photo or screen, not a live person."],
+  LOW_LIVENESS_CONFIDENCE: ["Liveness inconclusive", "Improve the lighting and try again."],
+  UNKNOWN_PERSON: ["Not recognised", "You may not be enrolled yet."],
+  LOW_IDENTITY_CONFIDENCE: ["Identity uncertain", "Face the camera directly and try again."],
+  ALREADY_MARKED: ["Attendance already marked", "You are recorded present for this session."],
+  NO_OPEN_SESSION: ["No open session", "There is no attendance session running right now."],
+  USER_INACTIVE: ["Account inactive", "Contact your administrator."],
+  SYSTEM_ERROR: ["System error", "Something went wrong. Try again."],
+};
+
+function setStatus(text, kind) {
+  $("statusText").textContent = text;
+  $("dot").className = "dot" + (kind ? " " + kind : "");
+}
+
+async function startCamera() {
+  try {
+    setStatus("Requesting camera…", "busy");
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 960 }, facingMode: "user" },
+      audio: false,
+    });
+    $("video").srcObject = stream;
+    await $("video").play();
+    setStatus("Ready — press Verify", "ok");
+    $("verifyBtn").disabled = false;
+    $("startBtn").textContent = "Restart camera";
+  } catch (e) {
+    setStatus("Camera unavailable: " + e.message, "err");
+  }
+}
+
+function grabFrame() {
+  const v = $("video");
+  const c = document.createElement("canvas");
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  const ctx = c.getContext("2d");
+  // Undo the CSS mirror so the backend receives the true orientation. The mirror is a
+  // display convention; sending mirrored frames would mean training and serving see
+  // systematically different images.
+  ctx.translate(c.width, 0); ctx.scale(-1, 1);
+  ctx.drawImage(v, 0, 0);
+  return new Promise(res => c.toBlob(res, "image/jpeg", 0.92));
+}
+
+async function verify() {
+  $("verifyBtn").disabled = true;
+  $("result").className = "result";
+  setStatus("Capturing…", "busy");
+
+  const frames = [];
+  for (let i = 0; i < N_FRAMES; i++) {
+    frames.push(await grabFrame());
+    await new Promise(r => setTimeout(r, FRAME_INTERVAL_MS));
+  }
+
+  setStatus("Checking liveness and identity…", "busy");
+  const fd = new FormData();
+  frames.forEach((b, i) => fd.append("frames", b, `f${i}.jpg`));
+
+  try {
+    const res = await fetch(API + "/verify", { method: "POST", body: fd });
+    show(await res.json());
+  } catch (e) {
+    show({ decision: "rejected", reason: "SYSTEM_ERROR", _detail: e.message });
+  }
+  $("verifyBtn").disabled = false;
+}
+
+function show(r) {
+  const box = $("result");
+  if (r.decision === "approved") {
+    setStatus("Attendance marked", "ok");
+    box.className = "result show approved";
+    $("rname").textContent = "Attendance marked";
+    $("rscores").innerHTML =
+      `<span>liveness <b>${(r.liveness_confidence ?? 0).toFixed(3)}</b></span>` +
+      `<span>identity <b>${(r.identity_confidence ?? 0).toFixed(3)}</b></span>`;
+  } else {
+    const [title, detail] = MESSAGES[r.reason] || ["Rejected", r.reason || "Unknown reason"];
+    setStatus(title, r.reason === "ALREADY_MARKED" ? "warn" : "err");
+    box.className = "result show rejected";
+    $("rname").textContent = title;
+    $("rscores").innerHTML = `<span>${detail}</span><span style="opacity:.6">${r.reason || ""}</span>`;
+  }
+}
+
+$("startBtn").onclick = startCamera;
+$("verifyBtn").onclick = verify;
+</script>
+</body>
+</html>
