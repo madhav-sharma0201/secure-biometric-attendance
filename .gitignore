@@ -1,0 +1,49 @@
+# Datasets & artifacts — never committed
+data/raw/*
+data/processed/*
+data/train/*
+data/val/*
+data/test/*
+!data/**/.gitkeep
+models/*
+!models/.gitkeep
+*.pth
+*.pt
+*.onnx
+*.ckpt
+runs/
+mlruns/
+outputs/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.yaml
+kubernetes/secrets.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Node
+node_modules/
+frontend/dist/
