@@ -1,0 +1,150 @@
+{
+  "threshold": 0.4534556269645691,
+  "threshold_criterion": "min_acer",
+  "threshold_selected_on": "validation split",
+  "validation": {
+    "apcer": 0.14634146341463414,
+    "apcer_worst_case": 1.0,
+    "apcer_per_attack": {
+      "display_photo_lightroom": 0.25,
+      "display_replay": 1.0,
+      "mask_handheld": 0.0,
+      "mask_handheld_bothglasses": 0.0,
+      "mask_handheld_printedglasses": 0.0,
+      "mask_handheld_realglasses": 0.0,
+      "mask_static": 0.0,
+      "mask_static_bothglasses": 0.0,
+      "mask_static_printedglasses": 0.0,
+      "mask_static_realglasses": 0.0,
+      "print_mask": 0.0,
+      "replay_phone": 0.21428571428571427
+    },
+    "bpcer": 0.07407407407407407,
+    "acer": 0.1102077687443541,
+    "roc_auc": 0.9259259259259259,
+    "accuracy": 0.8823529411764706,
+    "precision": 0.8064516129032258,
+    "recall": 0.9259259259259259,
+    "f1": 0.8620689655172414,
+    "confusion": {
+      "tp": 25,
+      "fn": 2,
+      "fp": 6,
+      "tn": 35
+    },
+    "n_live": 27,
+    "n_spoof": 41
+  },
+  "test": {
+    "apcer": 0.1038961038961039,
+    "apcer_worst_case": 0.5,
+    "apcer_per_attack": {
+      "display_photo_lightroom": 0.5,
+      "display_photo_nightlight": 0.0,
+      "display_replay": 0.0,
+      "mask_handheld": 0.0,
+      "mask_handheld_bothglasses": 0.0,
+      "mask_handheld_printedglasses": 0.0,
+      "mask_handheld_realglasses": 0.0,
+      "mask_static": 0.0,
+      "mask_static_bothglasses": 0.0,
+      "mask_static_printedglasses": 0.2857142857142857,
+      "mask_static_realglasses": 0.0,
+      "replay_phone": 0.35714285714285715
+    },
+    "bpcer": 0.09090909090909091,
+    "acer": 0.09740259740259741,
+    "roc_auc": 0.9508067689885872,
+    "accuracy": 0.9,
+    "precision": 0.7894736842105263,
+    "recall": 0.9090909090909091,
+    "f1": 0.8450704225352113,
+    "confusion": {
+      "tp": 30,
+      "fn": 3,
+      "fp": 8,
+      "tn": 69
+    },
+    "n_live": 33,
+    "n_spoof": 77
+  },
+  "test_confidence_intervals_95": {
+    "apcer": [
+      0.05359228295797315,
+      0.19184570936281223
+    ],
+    "bpcer": [
+      0.03140337104926306,
+      0.23572943534351032
+    ]
+  },
+  "test_misclassified": [
+    {
+      "clip_id": "rvf_test_59__replay_phone__00004",
+      "label": 0,
+      "score": 0.7592255473136902,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "rvf_train_36__replay_phone__00080",
+      "label": 0,
+      "score": 0.7641662359237671,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "lt_1__display_photo_lightroom__00001",
+      "label": 0,
+      "score": 0.9168601036071777,
+      "attack": "display_photo_lightroom"
+    },
+    {
+      "clip_id": "rvf_train_15__replay_phone__00057",
+      "label": 0,
+      "score": 0.7510557174682617,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "person_12__mask_static_printedglasses__00004",
+      "label": 0,
+      "score": 0.7257807850837708,
+      "attack": "mask_static_printedglasses"
+    },
+    {
+      "clip_id": "rvf_train_41__replay_phone__00086",
+      "label": 0,
+      "score": 0.9523056149482727,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "rvf_train_8__live__00158",
+      "label": 1,
+      "score": 0.009537870064377785,
+      "attack": "live"
+    },
+    {
+      "clip_id": "rvf_train_29__replay_phone__00072",
+      "label": 0,
+      "score": 0.5376791954040527,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "person_15__mask_static_printedglasses__00007",
+      "label": 0,
+      "score": 0.9946783781051636,
+      "attack": "mask_static_printedglasses"
+    },
+    {
+      "clip_id": "lt_17__live_daylight__00017",
+      "label": 1,
+      "score": 0.000653591298032552,
+      "attack": "live_daylight"
+    },
+    {
+      "clip_id": "person_7__live_no_glasses__00144",
+      "label": 1,
+      "score": 0.42272016406059265,
+      "attack": "live_no_glasses"
+    }
+  ],
+  "external": {}
+}

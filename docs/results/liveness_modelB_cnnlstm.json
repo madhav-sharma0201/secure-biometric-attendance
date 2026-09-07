@@ -1,0 +1,168 @@
+{
+  "threshold": 0.8758610486984253,
+  "threshold_criterion": "min_acer",
+  "threshold_selected_on": "validation split",
+  "validation": {
+    "apcer": 0.0975609756097561,
+    "apcer_worst_case": 0.5,
+    "apcer_per_attack": {
+      "display_photo_lightroom": 0.0,
+      "display_replay": 0.5,
+      "mask_handheld": 0.0,
+      "mask_handheld_bothglasses": 0.0,
+      "mask_handheld_printedglasses": 0.0,
+      "mask_handheld_realglasses": 0.0,
+      "mask_static": 0.0,
+      "mask_static_bothglasses": 0.0,
+      "mask_static_printedglasses": 0.0,
+      "mask_static_realglasses": 0.0,
+      "print_mask": 0.0,
+      "replay_phone": 0.21428571428571427
+    },
+    "bpcer": 0.14814814814814814,
+    "acer": 0.12285456187895212,
+    "roc_auc": 0.8888888888888888,
+    "accuracy": 0.8823529411764706,
+    "precision": 0.8518518518518519,
+    "recall": 0.8518518518518519,
+    "f1": 0.8518518518518519,
+    "confusion": {
+      "tp": 23,
+      "fn": 4,
+      "fp": 4,
+      "tn": 37
+    },
+    "n_live": 27,
+    "n_spoof": 41
+  },
+  "test": {
+    "apcer": 0.09090909090909091,
+    "apcer_worst_case": 1.0,
+    "apcer_per_attack": {
+      "display_photo_lightroom": 1.0,
+      "display_photo_nightlight": 1.0,
+      "display_replay": 0.0,
+      "mask_handheld": 0.0,
+      "mask_handheld_bothglasses": 0.0,
+      "mask_handheld_printedglasses": 0.14285714285714285,
+      "mask_handheld_realglasses": 0.0,
+      "mask_static": 0.0,
+      "mask_static_bothglasses": 0.0,
+      "mask_static_printedglasses": 0.14285714285714285,
+      "mask_static_realglasses": 0.0,
+      "replay_phone": 0.14285714285714285
+    },
+    "bpcer": 0.21212121212121213,
+    "acer": 0.15151515151515152,
+    "roc_auc": 0.911452184179457,
+    "accuracy": 0.8727272727272727,
+    "precision": 0.7878787878787878,
+    "recall": 0.7878787878787878,
+    "f1": 0.7878787878787878,
+    "confusion": {
+      "tp": 26,
+      "fn": 7,
+      "fp": 7,
+      "tn": 70
+    },
+    "n_live": 33,
+    "n_spoof": 77
+  },
+  "test_confidence_intervals_95": {
+    "apcer": [
+      0.044735141893571646,
+      0.17596311247051816
+    ],
+    "bpcer": [
+      0.10675886566436177,
+      0.37751977587129365
+    ]
+  },
+  "test_misclassified": [
+    {
+      "clip_id": "rvf_test_59__replay_phone__00004",
+      "label": 0,
+      "score": 0.9718559384346008,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "lt_1__display_photo_lightroom__00001",
+      "label": 0,
+      "score": 0.9852876663208008,
+      "attack": "display_photo_lightroom"
+    },
+    {
+      "clip_id": "person_8__live_glasses__00040",
+      "label": 1,
+      "score": 0.875145673751831,
+      "attack": "live_glasses"
+    },
+    {
+      "clip_id": "rvf_train_0__replay_phone__00050",
+      "label": 0,
+      "score": 0.9707634449005127,
+      "attack": "replay_phone"
+    },
+    {
+      "clip_id": "person_15__mask_static_printedglasses__00007",
+      "label": 0,
+      "score": 0.9850081205368042,
+      "attack": "mask_static_printedglasses"
+    },
+    {
+      "clip_id": "person_15__mask_handheld_printedglasses__00175",
+      "label": 0,
+      "score": 0.9172902703285217,
+      "attack": "mask_handheld_printedglasses"
+    },
+    {
+      "clip_id": "person_11__live_glasses__00024",
+      "label": 1,
+      "score": 0.026014801114797592,
+      "attack": "live_glasses"
+    },
+    {
+      "clip_id": "person_11__live_no_glasses__00129",
+      "label": 1,
+      "score": 0.8399604558944702,
+      "attack": "live_no_glasses"
+    },
+    {
+      "clip_id": "lt_30__display_photo_lightroom__00030",
+      "label": 0,
+      "score": 0.9361403584480286,
+      "attack": "display_photo_lightroom"
+    },
+    {
+      "clip_id": "lt_17__live_daylight__00017",
+      "label": 1,
+      "score": 0.01580144464969635,
+      "attack": "live_daylight"
+    },
+    {
+      "clip_id": "rvf_train_38__live__00137",
+      "label": 1,
+      "score": 0.26899421215057373,
+      "attack": "live"
+    },
+    {
+      "clip_id": "person_7__live_glasses__00039",
+      "label": 1,
+      "score": 0.14260631799697876,
+      "attack": "live_glasses"
+    },
+    {
+      "clip_id": "person_7__live_no_glasses__00144",
+      "label": 1,
+      "score": 0.29317933320999146,
+      "attack": "live_no_glasses"
+    },
+    {
+      "clip_id": "lt_35__display_photo_nightlight__00035",
+      "label": 0,
+      "score": 0.9374792575836182,
+      "attack": "display_photo_nightlight"
+    }
+  ],
+  "external": {}
+}

@@ -84,3 +84,48 @@ The real levers, in order of value:
 3. Batch the 8 detections into one ONNX call rather than 8 sequential calls
 
 None have been applied. They are listed as measured options, not as claims.
+
+---
+
+# Deployed latency (Kubernetes, measured end-to-end)
+
+Measured against the running kind cluster via `POST /verify` with an 8-frame burst,
+6 requests after a warmup, backend pod on Docker Desktop's Linux VM.
+
+| Configuration | P50 | P95 |
+|---|---:|---:|
+| 1000m CPU limit, thread counts unpinned | 7203 ms | 8196 ms |
+| 2000m CPU limit, `OMP_NUM_THREADS=2` | **3146 ms** | **3604 ms** |
+
+**2.3x faster, and most of it was not the extra CPU.**
+
+## The thread-contention bug
+
+ONNX Runtime and OpenMP size their thread pools from the **node's** visible CPU count
+(8 here), not from the container's cgroup quota. A pod limited to 1 CPU therefore ran
+8 inference threads over one core's worth of quota and spent its time context-switching
+and being throttled. Measured inside the pod at a 1 CPU limit, detection took ~699 ms
+with `OMP_NUM_THREADS=1` — *faster* than the default 8-thread configuration.
+
+`OMP_NUM_THREADS` and `ORT_NUM_THREADS` are now pinned in the Deployment alongside the
+CPU limit, with a comment stating that the two must be changed together. This is a
+standard containerised-inference failure and is invisible from application logs.
+
+## Against the target
+
+NFR-1 set a target of **P95 < 2 s**. The deployed system is at **P95 3.6 s**. The target
+is **not met**, and the shortfall is dominated by running face detection on all eight
+frames of the burst.
+
+Measured options, none applied:
+
+| Option | Expected effect | Cost |
+|---|---|---|
+| Reduce burst to 4 frames | ~2x faster | Changes the operating point; the model was evaluated on 8-frame clip averages, so it would need re-evaluating at 4 |
+| Run on a GPU node | 10-50x on detection | Requires GPU hardware; none available here |
+| Lighter detector (e.g. YuNet) | 3-5x | Different crops from those the liveness model was trained on — needs re-preprocessing and retraining |
+| Native Linux host instead of Docker Desktop | ~2-4x | Docker Desktop on macOS runs containers in a VM; the same detection is ~24 ms on the host and ~699 ms single-threaded in-pod |
+
+The honest summary: **the model is fast (5.45 ms) and the pipeline around it is slow.**
+Detection dominates, and the remaining fixes all trade against either the evaluated
+operating point or hardware that is not available.

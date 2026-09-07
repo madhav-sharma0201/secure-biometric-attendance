@@ -61,6 +61,26 @@ async def lifespan(app: FastAPI):
                             identity=settings.face_match_threshold,
                             liveness_uncertain_band=settings.liveness_uncertain_band)
 
+    # Load models eagerly rather than on first request. Lazy loading pushes the cost
+    # onto a real user and lets /ready report success before the model can actually
+    # serve. The startupProbe (failureThreshold 30) exists to cover this window.
+    model_errors = []
+    try:
+        liveness._ensure_loaded()
+        log.info("liveness_model_loaded", version=liveness.model_version,
+                 threshold=liveness.trained_threshold)
+    except Exception as e:
+        model_errors.append(f"liveness: {e}")
+        log.error("liveness_model_load_failed", error=str(e))
+    try:
+        faces._ensure_loaded()
+        recognition._ensure_loaded()
+        log.info("recognition_model_loaded", version=recognition.model_version)
+    except Exception as e:
+        model_errors.append(f"recognition: {e}")
+        log.error("recognition_model_load_failed", error=str(e))
+
+    app.state.model_errors = model_errors
     app.state.services = Services(
         faces=faces, liveness=liveness, recognition=recognition,
         verification=VerificationService(faces, liveness, recognition, thresholds),
@@ -151,8 +171,13 @@ def ready():
     except Exception:
         db_ok = False
 
-    ready = bool(svc) and db_ok
+    # A pod whose models failed to load is alive but cannot verify anyone. Reporting
+    # ready would route verification traffic into guaranteed SYSTEM_ERROR responses.
+    models_ok = bool(svc) and svc.liveness._sess is not None
+    ready = bool(svc) and db_ok and models_ok
     return JSONResponse(
         status_code=200 if ready else 503,
-        content={"ready": ready, "database": db_ok, "services": bool(svc)},
+        content={"ready": ready, "database": db_ok, "services": bool(svc),
+                 "models_loaded": models_ok,
+                 "model_errors": getattr(app.state, "model_errors", [])},
     )
