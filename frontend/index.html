@@ -62,6 +62,7 @@
     </div>
     <div class="controls">
       <button id="startBtn">Start camera</button>
+      <button id="enrolBtn" disabled>Enrol my face</button>
       <button id="verifyBtn" class="primary" disabled>Verify</button>
     </div>
   </div>
@@ -86,12 +87,27 @@ const API = localStorage.getItem("api") || "/api";
 //   localStorage.setItem("apiKey", "<key>")
 // Kept out of the page source deliberately — a key baked into a static asset served
 // to every visitor is not a key.
+// Accept ?key= and ?user= from the URL so a device can be provisioned by opening a
+// link. The values are moved into localStorage and stripped from the address bar so
+// the key does not linger in history or get copy-pasted around.
+(function provisionFromUrl() {
+  const q = new URLSearchParams(location.search);
+  let changed = false;
+  if (q.get("key")) { localStorage.setItem("apiKey", q.get("key")); q.delete("key"); changed = true; }
+  if (q.get("user")) { localStorage.setItem("userId", q.get("user")); q.delete("user"); changed = true; }
+  if (changed) {
+    history.replaceState({}, "", location.pathname + (q.toString() ? "?" + q : ""));
+  }
+})();
+
 const API_KEY = localStorage.getItem("apiKey") || "";
+const USER_ID = localStorage.getItem("userId") || "";
 
 const N_FRAMES = 8, FRAME_INTERVAL_MS = 120;
 
 const $ = id => document.getElementById(id);
-$("apiLabel").textContent = API + (API_KEY ? " (key set)" : " — NO API KEY SET");
+$("apiLabel").textContent = API + (API_KEY ? " · key set" : " · NO API KEY") +
+                            (USER_ID ? " · enrolled device" : "");
 
 let stream = null;
 
@@ -127,8 +143,9 @@ async function startCamera() {
     });
     $("video").srcObject = stream;
     await $("video").play();
-    setStatus("Ready — press Verify", "ok");
+    setStatus("Ready — enrol first, then verify", "ok");
     $("verifyBtn").disabled = false;
+    $("enrolBtn").disabled = !USER_ID;
     $("startBtn").textContent = "Restart camera";
   } catch (e) {
     setStatus("Camera unavailable: " + e.message, "err");
@@ -199,7 +216,56 @@ function show(r) {
   }
 }
 
+async function enrol() {
+  if (!USER_ID) { setStatus("No user id provisioned for this device", "err"); return; }
+  $("enrolBtn").disabled = true;
+  $("verifyBtn").disabled = true;
+  $("result").className = "result";
+
+  // Enrolment images are captured a little apart so they differ in pose and
+  // expression. Four near-identical frames would build a template that only matches
+  // one exact head position.
+  const shots = [];
+  for (let i = 0; i < 4; i++) {
+    setStatus(`Enrolling — capture ${i + 1} of 4, move your head slightly…`, "busy");
+    await new Promise(r => setTimeout(r, 900));
+    shots.push(await grabFrame());
+  }
+
+  setStatus("Building your face template…", "busy");
+  const fd = new FormData();
+  fd.append("user_id", USER_ID);
+  shots.forEach((b, i) => fd.append("images", b, `e${i}.jpg`));
+
+  try {
+    const res = await fetch(API + "/enrollment", {
+      method: "POST", body: fd,
+      headers: API_KEY ? { "X-API-Key": API_KEY } : {},
+    });
+    const j = await res.json();
+    if (res.ok) {
+      setStatus(`Enrolled — ${j.n_images_accepted} images accepted`, "ok");
+      $("result").className = "result show approved";
+      $("rname").textContent = "Face enrolled";
+      $("rscores").innerHTML =
+        `<span>accepted <b>${j.n_images_accepted}</b></span>` +
+        `<span>rejected <b>${j.n_images_rejected}</b></span>` +
+        `<span>model <b>${j.model_version}</b></span>`;
+    } else {
+      setStatus("Enrolment failed", "err");
+      $("result").className = "result show rejected";
+      $("rname").textContent = "Enrolment failed";
+      $("rscores").innerHTML = `<span>${j.detail || res.status}</span>`;
+    }
+  } catch (e) {
+    setStatus("Enrolment error: " + e.message, "err");
+  }
+  $("enrolBtn").disabled = false;
+  $("verifyBtn").disabled = false;
+}
+
 $("startBtn").onclick = startCamera;
+$("enrolBtn").onclick = enrol;
 $("verifyBtn").onclick = verify;
 </script>
 </body>
