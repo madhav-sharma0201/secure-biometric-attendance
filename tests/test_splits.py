@@ -137,3 +137,13 @@ def test_mixed_label_groups_skip_stratification_and_still_split_cleanly():
     assert members["val"] & members["test"] == set()
     for name, rs in splits.items():
         assert {r["label"] for r in rs} == {"live", "spoof"}, f"{name} missing a class"
+
+
+def test_preprocessing_config_is_shared_between_training_and_serving():
+    """det_size must come from one place, or train and serve can silently disagree."""
+    from ml.preprocessing.face_processor import PREPROCESSING, FaceProcessor
+    fp = FaceProcessor()
+    assert fp.det_size == PREPROCESSING["det_size"]
+    assert fp.image_size == PREPROCESSING["image_size"]
+    # explicit arguments still win, for deliberate experiments
+    assert FaceProcessor(det_size=320).det_size == 320
