@@ -147,3 +147,32 @@ def test_preprocessing_config_is_shared_between_training_and_serving():
     assert fp.image_size == PREPROCESSING["image_size"]
     # explicit arguments still win, for deliberate experiments
     assert FaceProcessor(det_size=320).det_size == 320
+
+
+def test_dataset_resolves_per_row_crops_dir(tmp_path):
+    """A pooled corpus draws clips from several crop directories."""
+    import cv2
+    import numpy as np
+
+    # torch is only installed in the training environment (.venv311); this laptop's
+    # default interpreter has no wheel for it. Skip rather than fail.
+    pytest.importorskip("torch")
+    from ml.liveness.dataset import LivenessDataset
+
+    dirs = {}
+    rows = []
+    for src in ("a", "b"):
+        d = tmp_path / src
+        for i in range(2):
+            clip = d / f"{src}_clip{i}"
+            clip.mkdir(parents=True)
+            for f in range(4):
+                cv2.imwrite(str(clip / f"frame_{f:03d}.jpg"),
+                            np.zeros((112, 112, 3), dtype=np.uint8))
+            rows.append({"clip_id": f"{src}_clip{i}", "label": "live",
+                         "attack_type": "live", "crops_dir": str(d)})
+        dirs[src] = str(d)
+
+    # A wrong shared directory must not matter when rows carry their own.
+    ds = LivenessDataset(rows, str(tmp_path / "nonexistent"), mode="frame", seq_len=4)
+    assert len(ds) == 4, f"expected 4 clips, got {len(ds)} (skipped: {ds.skipped})"

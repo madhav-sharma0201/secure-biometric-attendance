@@ -89,7 +89,11 @@ class LivenessDataset(Dataset):
         self.items: list[dict] = []
         self.skipped: list[str] = []
         for r in rows:
-            clip_dir = os.path.join(crops_dir, r["clip_id"])
+            # A pooled corpus draws clips from several crop directories, so each row
+            # may carry its own. Falling back to the shared directory keeps
+            # single-source use unchanged.
+            base = r.get("crops_dir") or crops_dir
+            clip_dir = os.path.join(base, r["clip_id"])
             if not os.path.isdir(clip_dir):
                 self.skipped.append(r["clip_id"])
                 continue
@@ -153,7 +157,8 @@ def clip_eval_batches(rows, crops_dir, mode, seq_len=8, max_seqs=4):
     Deterministic: no randomness at evaluation time, so a rerun reproduces the metric.
     """
     for r in rows:
-        clip_dir = os.path.join(crops_dir, r["clip_id"])
+        base = r.get("crops_dir") or crops_dir
+        clip_dir = os.path.join(base, r["clip_id"])
         if not os.path.isdir(clip_dir):
             continue
         frames = sorted(os.path.join(clip_dir, f)

@@ -162,9 +162,23 @@ def select_threshold(
     """
     labels = np.asarray(labels).astype(int)
     scores = np.asarray(scores, dtype=float)
-    candidates = np.unique(np.concatenate([scores, [0.0, 1.0]]))
+    # Candidates must include the MIDPOINTS between consecutive observed scores, not
+    # only the scores themselves. With only observed values available, the best
+    # threshold on well-separated validation data is the lowest live score itself —
+    # leaving zero margin, so any unseen live face scoring even slightly lower is
+    # rejected. That is what produced 60% BPCER on the first run while validation
+    # showed 0% ACER.
+    # Candidates are the MIDPOINTS between consecutive observed scores, plus the
+    # bounds. A threshold placed exactly on an observed score is arbitrary under a
+    # `>=` comparison and leaves zero margin on one side: on well-separated
+    # validation data the best such threshold is the lowest live score itself, so any
+    # unseen live face scoring even slightly lower is rejected. That produced 60%
+    # BPCER on the first training run while validation reported 0% ACER.
+    uniq = np.unique(scores)
+    midpoints = (uniq[:-1] + uniq[1:]) / 2.0 if len(uniq) > 1 else np.array([])
+    candidates = np.unique(np.concatenate([midpoints, [0.0, 1.0]]))
 
-    best_t, best_cost = 0.5, float("inf")
+    costs = []
     for t in candidates:
         m = compute_metrics(labels, scores, float(t))
         if criterion == "min_acer":
@@ -175,8 +189,17 @@ def select_threshold(
             cost = m.bpcer if m.apcer <= target_apcer else float("inf")
         else:
             raise ValueError(f"unknown criterion {criterion!r}")
-        if cost < best_cost:
-            best_t, best_cost = float(t), cost
+        costs.append((float(t), cost))
+
+    best_cost = min(c for _, c in costs)
+
+    # When validation separates the classes perfectly, every threshold inside the gap
+    # scores zero cost. Picking the first one puts the operating point hard against
+    # the edge of the gap, so any test score that drifts slightly lands on the wrong
+    # side. Take the midpoint of the tied band instead, which is the most robust
+    # choice the validation data supports.
+    tied = [t for t, c in costs if c == best_cost]
+    best_t = float((tied[0] + tied[-1]) / 2.0) if tied else 0.5
 
     if best_cost == float("inf"):
         raise ValueError(
