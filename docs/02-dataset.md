@@ -1,62 +1,78 @@
 # Phase 2 — Dataset Selection
 
-## Candidates evaluated
+## Final selection
 
-| Dataset | Format | Attacks | Subject IDs | License | Verdict |
-|---|---|---|---|---|---|
-| CASIA-FASD | video | print, cut-photo, replay | yes (per-subject dirs) | EULA, multi-day | rejected: 3-day timeline |
-| Replay-Attack (Idiap) | video | print, photo, replay | yes | EULA | rejected: same |
-| OULU-NPU / SiW | video | print, replay | yes | EULA, ~100 GB | rejected: EULA + size |
-| CelebA-Spoof | **images only** | rich, annotated | yes (10k ids) | CC BY-NC | rejected as primary: no temporal signal |
-| `trainingdatapro/real-vs-fake` | video | **replay only** | **no** | CC BY-NC-ND 4.0 | **selected (primary)** |
-| `axondata/face-anti-spoofing-dataset` | video | mostly 3D masks | **no** | CC BY-NC 4.0 | rejected: wrong threat model |
+| Role | Dataset | Why |
+|---|---|---|
+| **Primary (train + test)** | `trainingdatapro/attacks-with-2d-printed-masks-of-indian-people` | Only free option with real subject IDs; live and spoof from the same people and session |
+| **Cross-attack eval** | `trainingdatapro/real-vs-fake-anti-spoofing-video-classification` | Phone replay — an attack type absent from training |
+| **External test** | self-collected | Unseen people, unseen cameras, unseen conditions |
 
-## Why the axondata set was rejected despite looking largest
+## Primary dataset structure
 
-Its headline ("100,000+ videos, 11 attack types") describes the vendor's commercial
-product; the free Kaggle sample is a small excerpt. More importantly its attack mix is
-dominated by 3D masks — silicone, latex, resin, cloth. That is the wrong threat model
-for attendance. The realistic proxy-attendance attack is a phone screen or a printed
-photo, not a custom silicone mask of a classmate.
+1.82 GB, 210 videos, 3–4 s each, indoor and outdoor, varied lighting.
 
-Choosing a dataset because it is large, rather than because its attacks match the
-deployment threat, is a common and expensive mistake.
+```
+attacks/1/<person>.mp4   real, no glasses              LIVE
+attacks/2/<person>.mp4   real, with glasses            LIVE
+attacks/3/<person>.mp4   mask, static                  SPOOF
+attacks/4/<person>.mp4   mask + real glasses, static   SPOOF
+attacks/5/<person>.mp4   mask, hand-held               SPOOF
+attacks/6/<person>.mp4   mask + real glasses, handheld SPOOF
+attacks/7..10/           printed-glasses variants      SPOOF
+```
 
-## Data splitting strategy
+21 subjects x 10 videos. **The filename is the person index and is consistent across
+all ten folders**, so `attacks/5/7.mp4` is the same person as `attacks/1/7.mp4`.
 
-**Constraint discovered:** neither Kaggle dataset exposes a per-person identifier. The
-vendor's `worker_id` field exists only in their paid full release. Subject-grouped
-splitting is therefore impossible.
+## Why this dataset over the alternatives
 
-**Fallback: clip-level grouping.** All frames and all sequences derived from one source
-video are assigned to exactly one split. This eliminates the dominant leakage risk —
-near-duplicate frames appearing in both train and test.
+**It has subject identifiers.** Every other free candidate (`real-vs-fake`,
+`axondata`, the vendor's other releases) names files by a bare counter with no person
+mapping, forcing clip-level grouping. Here, subject-grouped splitting is possible:
+the test set contains people the model has never seen. This was listed as requirement
+MLR-3 and was nearly abandoned.
 
-**Residual risk and why it is limited here.** Clip grouping does not prevent the same
-person appearing in both train and test. In this dataset that matters less than usual:
-every attack video is a replay of that same person's genuine video, so each individual
-appears on *both* sides of the label. Memorising an identity therefore provides no
-signal for the live/spoof decision. The leakage is real but largely defanged by the
-dataset's construction.
+**Live and spoof come from the same subjects and the same capture session.** This
+matters more than it appears. Combining a live-only dataset with a spoof-only dataset
+lets a model separate the classes by camera signature, compression artifacts or
+lighting rather than by spoofing cues — scoring near-perfectly while learning nothing
+about presentation attacks. Matched capture removes that shortcut entirely.
 
-**This is a limitation, not a solved problem, and the README states it as such.**
+**The static/hand-held split is a testable hypothesis.** Four attack variants are
+mounted and four are hand-held. A hand-held mask jitters; a mounted one does not. If
+the temporal model beats the single-frame baseline, this is where the gain should
+appear, and the per-attack table will show whether it does. That converts the
+CNN-LSTM from an architectural assertion into an experiment.
 
-## Consequence: the self-collected test set is now mandatory
+**Demographic relevance.** Subjects are Indian, matching the intended deployment
+population. Public FAS datasets are demographically narrow; this partially addresses
+the bias limitation recorded in Phase 0. It does not eliminate it.
 
-Because no unseen-subject split is available from the public data, the self-collected
-set is the project's only measurement of true generalisation to new people, and its
-only source of print and laptop-screen attacks. It is promoted from optional (see
-`01-scope.md`) to required.
+## Split strategy
 
-Target: ~15 live clips (varied lighting, pose, distance, camera) and ~15 spoofs
-(phone screen, laptop screen, printed photo). Roughly 20 minutes to record. Used
-exclusively as a held-out external test set — never for training or threshold selection.
+Subject-grouped, 60/20/20 by subject: **12 train / 4 val / 5 test subjects**
+(120 / 40 / 50 clips). Verified: zero subject overlap between any two splits.
 
-## Honest framing for the report
+Stratification is disabled under subject grouping because each subject carries both
+labels; mixed-label groups already guarantee both classes appear in every split.
 
-- Intra-dataset results are computed on clip-grouped splits of a single-vendor,
-  single-attack-type dataset. They measure replay detection, not anti-spoofing broadly.
-- The self-collected set is small, and collected by one person in one location. It
-  indicates generalisation direction; it does not establish it.
-- No claim is made about print, cut-photo, or 3D mask attacks beyond what the
-  self-collected set contains.
+## Known weaknesses — stated in the README, not hidden
+
+- **21 subjects is small.** The test set is 5 people, 50 clips. ACER estimates from
+  50 clips carry wide confidence intervals. Report the interval, not just the point
+  estimate, and do not present a single ACER figure as precise.
+- **Class imbalance is 4:1 spoof:live** (168 / 42). Handled with class weighting in
+  the loss. APCER and BPCER are computed per class and are unaffected by imbalance,
+  which is a further reason not to headline accuracy.
+- **Primary attacks are print/mask only.** No replay attack appears in training.
+  Replay is therefore evaluated strictly as an *unseen attack type* against the
+  secondary dataset — a harder and more honest test than training on it.
+- **Single vendor, single capture pipeline.** Generalisation beyond it is measured
+  only by the secondary and self-collected sets.
+
+## Licensing
+
+Both datasets are CC BY-NC / CC BY-NC-ND — non-commercial use only. Acceptable for a
+portfolio and academic project; attribution is included in the README. Any commercial
+deployment would require different data.
