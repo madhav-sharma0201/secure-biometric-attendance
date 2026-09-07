@@ -1,7 +1,7 @@
 # Backend + inference services. CPU-only, no torch — keeps the image small.
 fastapi>=0.110
 uvicorn[standard]>=0.29
-pydantic>=2.6
+pydantic[email]>=2.6
 pydantic-settings>=2.2
 sqlalchemy>=2.0
 psycopg[binary]>=3.1

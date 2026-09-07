@@ -47,3 +47,4 @@ htmlcov/
 # Node
 node_modules/
 frontend/dist/
+kubernetes/secrets.yaml

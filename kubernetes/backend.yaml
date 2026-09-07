@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: attendance
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0     # never drop capacity mid-rollout
+      maxSurge: 1
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: backend
+          image: attendance-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: { name: attendance-config }
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: attendance-secrets, key: POSTGRES_PASSWORD } }
+            - name: API_KEY
+              valueFrom: { secretKeyRef: { name: attendance-secrets, key: API_KEY } }
+            - name: DATABASE_URL
+              value: postgresql+psycopg://attendance:$(POSTGRES_PASSWORD)@postgres:5432/attendance
+
+          # /health = is the process alive. /ready = can it serve traffic.
+          # Using /health for readiness would route requests to a pod whose database
+          # is unreachable; using /ready for liveness would restart a healthy pod
+          # whenever the database blipped. They are deliberately different endpoints.
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /ready, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 2
+          startupProbe:
+            # Model loading dominates startup. Without this, the liveness probe would
+            # kill the pod before ONNX and ArcFace finish loading, producing a crash
+            # loop that looks like a broken image.
+            httpGet: { path: /health, port: 8000 }
+            failureThreshold: 30
+            periodSeconds: 5
+
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits:   { cpu: "1000m", memory: "1536Mi" }
+
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-pvc
+  namespace: attendance
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: attendance
+spec:
+  selector: { app: backend }
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP     # internal only; the Ingress is the public edge
