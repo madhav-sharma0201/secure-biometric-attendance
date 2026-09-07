@@ -53,7 +53,7 @@ def percentile(sorted_vals: list[float], q: float) -> float:
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (k - lo)
 
 
-async def _worker(client, url, payload, queue, latencies, codes):
+async def _worker(client, url, payload, queue, latencies, codes, headers=None):
     while True:
         try:
             queue.get_nowait()
@@ -62,9 +62,9 @@ async def _worker(client, url, payload, queue, latencies, codes):
         t0 = time.perf_counter()
         try:
             if payload is None:
-                r = await client.get(url)
+                r = await client.get(url, headers=headers)
             else:
-                r = await client.post(url, files=payload)
+                r = await client.post(url, files=payload, headers=headers)
             code = str(r.status_code)
         except Exception as e:
             code = f"exc:{type(e).__name__}"
@@ -75,7 +75,7 @@ async def _worker(client, url, payload, queue, latencies, codes):
 
 
 async def run(url: str, endpoint: str, concurrency: int, n: int, warmup: int,
-              label: str, payload=None) -> Result:
+              label: str, payload=None, headers: dict | None = None) -> Result:
     target = url.rstrip("/") + endpoint
     limits = httpx.Limits(max_connections=concurrency * 2,
                           max_keepalive_connections=concurrency * 2)
@@ -85,7 +85,7 @@ async def run(url: str, endpoint: str, concurrency: int, n: int, warmup: int,
             q = asyncio.Queue()
             for _ in range(warmup):
                 q.put_nowait(1)
-            await asyncio.gather(*[_worker(client, target, payload, q, [], {})
+            await asyncio.gather(*[_worker(client, target, payload, q, [], {}, headers)
                                    for _ in range(concurrency)])
 
         latencies: list[float] = []
@@ -95,7 +95,7 @@ async def run(url: str, endpoint: str, concurrency: int, n: int, warmup: int,
             q.put_nowait(1)
 
         t0 = time.perf_counter()
-        await asyncio.gather(*[_worker(client, target, payload, q, latencies, codes)
+        await asyncio.gather(*[_worker(client, target, payload, q, latencies, codes, headers)
                                for _ in range(concurrency)])
         duration = time.perf_counter() - t0
 
@@ -141,10 +141,12 @@ def main() -> None:
     ap.add_argument("--warmup", type=int, default=50)
     ap.add_argument("--label", default="run")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--api-key", default=None, help="sent as X-API-Key")
     args = ap.parse_args()
 
+    headers = {"X-API-Key": args.api_key} if args.api_key else None
     res = asyncio.run(run(args.url, args.endpoint, args.concurrency,
-                          args.requests, args.warmup, args.label))
+                          args.requests, args.warmup, args.label, headers=headers))
     print(format_table([res]))
     print()
     print(json.dumps(asdict(res), indent=2))
