@@ -34,7 +34,18 @@ COPY --chown=appuser:appuser configs/ ./configs/
 RUN mkdir -p /app/models && chown appuser:appuser /app/models
 
 USER appuser
-ENV PYTHONPATH=/app PYTHONUNBUFFERED=1 INSIGHTFACE_HOME=/app/models/.insightface
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
+
+# Bake the ArcFace/SCRFD weights into the image.
+#
+# Without this, InsightFace downloads ~300 MB from GitHub on every pod start: slow
+# rollouts, a hard runtime dependency on an external host, and startup that can exceed
+# the probe budget (which is how this was found — a pod restarted mid-download).
+# Downloaded as appuser so it lands in the same home directory the process reads at
+# runtime; setting INSIGHTFACE_HOME was not honoured by this version.
+RUN python -c "from insightface.app import FaceAnalysis; \
+    a = FaceAnalysis(name='buffalo_l'); a.prepare(ctx_id=-1, det_size=(320, 320))" \
+    && du -sh /home/appuser/.insightface
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \

@@ -15,11 +15,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://attendance:change_me@localhost:5432/attendance"
 
     liveness_model_path: str = "models/liveness.onnx"
-    liveness_model_version: str = "dev"
+    liveness_model_version: str = "modelA_cnn"
     recognition_model_version: str = "buffalo_l"
 
     # Calibrated on validation data. See docs and the run report they came from.
-    liveness_threshold: float = 0.5
+    liveness_threshold: float = 0.4535
     face_match_threshold: float = 0.5
     liveness_uncertain_band: float = 0.10
 

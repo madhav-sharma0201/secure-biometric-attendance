@@ -35,6 +35,12 @@ spec:
               valueFrom: { secretKeyRef: { name: attendance-secrets, key: API_KEY } }
             - name: DATABASE_URL
               value: postgresql+psycopg://attendance:$(POSTGRES_PASSWORD)@postgres:5432/attendance
+            # Match the CPU limit above. Left unset, ONNX Runtime and OpenMP size their
+            # pools from the node's CPU count and contend for a fraction of a core.
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: ORT_NUM_THREADS
+              value: "2"
 
           # /health = is the process alive. /ready = can it serve traffic.
           # Using /health for readiness would route requests to a pod whose database
@@ -59,8 +65,12 @@ spec:
             periodSeconds: 5
 
           resources:
-            requests: { cpu: "250m", memory: "512Mi" }
-            limits:   { cpu: "1000m", memory: "1536Mi" }
+            # Inference is CPU-bound. The limit and OMP_NUM_THREADS below must agree:
+            # ONNX Runtime sizes its thread pool from the NODE's visible CPU count,
+            # not the cgroup quota, so an unpinned pod spawns 8 threads to share 1 CPU
+            # of quota and thrashes. Measured: 8 contending threads were slower than 1.
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits:   { cpu: "2000m", memory: "2Gi" }
 
           volumeMounts:
             - name: models

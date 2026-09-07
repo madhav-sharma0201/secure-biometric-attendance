@@ -1,0 +1,155 @@
+{
+  "run_id": "modelB_cnnlstm",
+  "config": {
+    "seed": 42,
+    "data": {
+      "dataset_name": null,
+      "root": "data/processed",
+      "image_size": 112,
+      "sequence_length": 8,
+      "frame_stride": 3,
+      "split_by": "subject"
+    },
+    "model": {
+      "arch": "cnn_lstm",
+      "backbone": "mobilenet_v3_small",
+      "pretrained": true,
+      "temporal_model": "lstm",
+      "hidden_size": 128,
+      "bidirectional": true,
+      "dropout": 0.3
+    },
+    "training": {
+      "batch_size": 32,
+      "learning_rate": 0.0003,
+      "epochs": 20,
+      "optimizer": "adamw",
+      "weight_decay": 0.0001,
+      "scheduler": "cosine",
+      "early_stopping_patience": 5,
+      "mixed_precision": true,
+      "num_workers": 2
+    },
+    "augmentation": {
+      "enabled": true,
+      "flip": 0.5,
+      "brightness": 0.3,
+      "contrast": 0.3,
+      "jpeg": 0.2,
+      "blur": 0.2
+    },
+    "output": {
+      "checkpoint_dir": "models",
+      "run_log": "runs"
+    }
+  },
+  "device": "cpu",
+  "n_train": 522,
+  "n_val": 68,
+  "epochs": [
+    {
+      "epoch": 0,
+      "train_loss": 0.8004668951034546,
+      "val_acer": 0.2755194218608853,
+      "val_apcer": 0.36585365853658536,
+      "val_bpcer": 0.18518518518518517,
+      "val_auc": 0.7705510388437218,
+      "threshold": 0.5842035710811615,
+      "lr": 0.00029815325108927063
+    },
+    {
+      "epoch": 1,
+      "train_loss": 0.5204644780606031,
+      "val_acer": 0.17208672086720866,
+      "val_apcer": 0.12195121951219512,
+      "val_bpcer": 0.2222222222222222,
+      "val_auc": 0.8798554652213189,
+      "threshold": 0.6456397473812103,
+      "lr": 0.00029265847744427303
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.30282498616725206,
+      "val_acer": 0.14679313459801263,
+      "val_apcer": 0.21951219512195122,
+      "val_bpcer": 0.07407407407407407,
+      "val_auc": 0.8979223125564589,
+      "threshold": 0.7430927157402039,
+      "lr": 0.0002836509786282552
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.18316554953344166,
+      "val_acer": 0.13504968383017163,
+      "val_apcer": 0.12195121951219512,
+      "val_bpcer": 0.14814814814814814,
+      "val_auc": 0.8970189701897019,
+      "threshold": 0.6042257845401764,
+      "lr": 0.0002713525491562421
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.14535751834046096,
+      "val_acer": 0.12285456187895212,
+      "val_apcer": 0.0975609756097561,
+      "val_bpcer": 0.14814814814814814,
+      "val_auc": 0.8888888888888888,
+      "threshold": 0.8758610486984253,
+      "lr": 0.0002560660171779821
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.11223697429522872,
+      "val_acer": 0.13504968383017163,
+      "val_apcer": 0.12195121951219512,
+      "val_bpcer": 0.14814814814814814,
+      "val_auc": 0.8861788617886179,
+      "threshold": 0.8722780644893646,
+      "lr": 0.000238167787843871
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.09533081424888223,
+      "val_acer": 0.15401987353206864,
+      "val_apcer": 0.04878048780487805,
+      "val_bpcer": 0.25925925925925924,
+      "val_auc": 0.8798554652213189,
+      "threshold": 0.8536109924316406,
+      "lr": 0.00021809857496093204
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.10493886994663626,
+      "val_acer": 0.14724480578139115,
+      "val_apcer": 0.14634146341463414,
+      "val_bpcer": 0.14814814814814814,
+      "val_auc": 0.8861788617886179,
+      "threshold": 0.11855854094028473,
+      "lr": 0.00019635254915624216
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.039790364739019424,
+      "val_acer": 0.14724480578139115,
+      "val_apcer": 0.14634146341463414,
+      "val_bpcer": 0.14814814814814814,
+      "val_auc": 0.8897922312556459,
+      "threshold": 0.31422214210033417,
+      "lr": 0.00017346516975603468
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.09237817459506914,
+      "val_acer": 0.14724480578139115,
+      "val_apcer": 0.14634146341463414,
+      "val_bpcer": 0.14814814814814814,
+      "val_auc": 0.8943089430894309,
+      "threshold": 0.23759596049785614,
+      "lr": 0.00015000000000000001
+    }
+  ],
+  "best_epoch": 4,
+  "best_val_acer": 0.12285456187895212,
+  "duration_sec": 354.86364006996155,
+  "notes": ""
+}
