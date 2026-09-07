@@ -1,0 +1,18 @@
+{
+  "label": "1 replica",
+  "endpoint": "/users",
+  "concurrency": 16,
+  "n_requests": 400,
+  "n_success": 400,
+  "n_error": 0,
+  "duration_sec": 6.189,
+  "throughput_rps": 64.63,
+  "p50_ms": 248.25,
+  "p95_ms": 444.14,
+  "p99_ms": 551.56,
+  "mean_ms": 244.71,
+  "max_ms": 763.79,
+  "status_codes": {
+    "200": 400
+  }
+}
