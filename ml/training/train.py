@@ -40,6 +40,25 @@ class RunLog:
             json.dump(asdict(self), fh, indent=2)
 
 
+def pick_device() -> str:
+    """Choose a device that will actually work, not merely one that reports available.
+
+    torch.cuda.is_available() returns True on a GPU whose compute capability the
+    installed torch build does not support (Kaggle hands out Tesla P100s at sm_60,
+    while their PyTorch ships sm_70+). The failure then surfaces as an AcceleratorError
+    on the first forward pass, after preprocessing has already run. Checking capability
+    up front converts a late crash into an early, explicit CPU fallback.
+    """
+    if torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability()
+        supported = torch.cuda.get_arch_list()
+        if any(a.startswith(f"sm_{major}{minor}") for a in supported):
+            return "cuda"
+        print(f"WARNING: GPU {torch.cuda.get_device_name(0)} is sm_{major}{minor}, "
+              f"unsupported by this torch build ({supported}). Falling back to CPU.")
+    return "cpu"
+
+
 def set_seed(seed: int) -> None:
     import random
     random.seed(seed)
@@ -70,7 +89,8 @@ def score_clips(model, rows, crops_dir, mode, seq_len, device, max_seqs=4):
 
 def train(cfg: dict, splits: dict, crops_dir: str, out_dir: str, run_id: str) -> RunLog:
     set_seed(cfg.get("seed", 42))
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = pick_device()
+    print(f"device: {device}")
 
     mcfg, tcfg, dcfg = cfg["model"], cfg["training"], cfg["data"]
     mode = "frame" if mcfg["arch"] == "cnn" else "sequence"
