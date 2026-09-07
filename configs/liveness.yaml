@@ -31,11 +31,13 @@ training:
 
 augmentation:
   enabled: true
-  horizontal_flip: 0.5
-  color_jitter: 0.3
-  random_resized_crop: 0.3
-  jpeg_compression: 0.2       # mimics replay/recompression artifacts
-  motion_blur: 0.2
+  # Keys map directly onto ml.liveness.dataset.SequenceAugment parameters.
+  # Every value is applied identically across all frames of a sequence.
+  flip: 0.5                   # probability of horizontal flip
+  brightness: 0.3             # +/- fraction
+  contrast: 0.3               # +/- fraction
+  jpeg: 0.2                   # probability of JPEG recompression
+  blur: 0.2                   # probability of Gaussian blur
 
 output:
   checkpoint_dir: models

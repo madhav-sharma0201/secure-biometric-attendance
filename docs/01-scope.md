@@ -58,3 +58,16 @@ A 20-minute self-collected test set — ~15 live clips across lighting condition
 spoofs (phone screen, laptop screen, printout). Used purely as an external generalisation
 test. Highest value-per-minute item remaining: it is the only measurement of real-world
 generalisation and the most convincing part of a live demo.
+
+## Local development environment note
+
+PyTorch publishes no wheels for Intel macOS on Python 3.13 (x86-64 Mac builds stopped
+after torch 2.2.2, which predates 3.13). Two virtualenvs are therefore used locally:
+
+- `.venv`   Python 3.13 — tests, backend, preprocessing utilities
+- `.venv311` Python 3.11 + torch 2.2.2 + numpy<2 — running the ML pipeline locally on
+  synthetic fixtures before committing a Kaggle GPU session to it
+
+Training itself always runs on Kaggle. `.venv311` exists only so that shape errors,
+config mismatches and export bugs are caught on a laptop in seconds rather than
+after a preprocessing run on a GPU box.
