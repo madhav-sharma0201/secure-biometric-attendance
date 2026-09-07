@@ -1,0 +1,26 @@
+# Face preprocessing parameters.
+#
+# SINGLE SOURCE OF TRUTH for both dataset preprocessing and live inference. These two
+# paths MUST agree: if training crops are produced with different detection settings
+# than serving crops, the model sees a different input distribution in production than
+# it trained on, and the measured metrics stop predicting real behaviour.
+#
+# Changing det_size therefore invalidates existing checkpoints. Re-preprocess and
+# retrain before deploying a change here.
+#
+# Measured detection cost on Intel i9-9880H CPU (docs/results/inference-latency.md):
+#   det_size 640 -> 101.6 ms   (current)
+#   det_size 480 ->  59.9 ms   1.70x
+#   det_size 320 ->  23.9 ms   4.26x
+#   det_size 256 ->  14.4 ms   7.06x
+#
+# 320 is the attractive operating point, but it has NOT been adopted because the
+# current checkpoints were trained on 640-derived crops.
+
+detection:
+  det_size: 640          # detector input resolution (square)
+  image_size: 112        # aligned crop size, fixed by the ArcFace template
+
+sampling:
+  max_frames: 16         # frames cached per clip during preprocessing
+  stride: 3              # sample every Nth frame from the source video

@@ -17,6 +17,33 @@ MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
+def _load_preprocessing_config() -> dict:
+    """Read configs/preprocessing.yaml if present, else fall back to the shipped values.
+
+    Defaults live in one file rather than in two call sites, because the failure mode
+    of disagreeing detection settings is silent: crops differ subtly, metrics stay
+    plausible, and production behaviour drifts from what was measured.
+    """
+    import os
+    defaults = {"det_size": 640, "image_size": 112}
+    for candidate in ("configs/preprocessing.yaml",
+                      os.path.join(os.path.dirname(__file__), "..", "..",
+                                   "configs", "preprocessing.yaml")):
+        if os.path.exists(candidate):
+            try:
+                import yaml
+                cfg = yaml.safe_load(open(candidate)) or {}
+                det = cfg.get("detection", {})
+                return {"det_size": int(det.get("det_size", defaults["det_size"])),
+                        "image_size": int(det.get("image_size", defaults["image_size"]))}
+            except Exception:
+                return defaults
+    return defaults
+
+
+PREPROCESSING = _load_preprocessing_config()
+
+
 @dataclass
 class DetectedFace:
     """One detected face: the aligned crop plus the metadata the caller needs."""
@@ -33,10 +60,15 @@ class FaceProcessor:
     for the API process, which imports it at startup but may not need it immediately.
     """
 
-    def __init__(self, image_size: int = 112, det_size: int = 640, ctx_id: int = -1):
-        """ctx_id: -1 for CPU, >=0 selects a GPU. Kaggle training passes 0."""
-        self.image_size = image_size
-        self.det_size = det_size
+    def __init__(self, image_size: int | None = None, det_size: int | None = None,
+                 ctx_id: int = -1):
+        """ctx_id: -1 for CPU, >=0 selects a GPU. Kaggle training passes 0.
+
+        image_size and det_size default to configs/preprocessing.yaml so that the
+        training and serving paths cannot be configured differently by accident.
+        """
+        self.image_size = image_size if image_size is not None else PREPROCESSING["image_size"]
+        self.det_size = det_size if det_size is not None else PREPROCESSING["det_size"]
         self.ctx_id = ctx_id
         self._app = None
 
