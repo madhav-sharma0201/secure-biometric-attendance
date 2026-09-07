@@ -5,8 +5,10 @@
 | Role | Dataset | Why |
 |---|---|---|
 | **Primary (train + test)** | `trainingdatapro/attacks-with-2d-printed-masks-of-indian-people` | Only free option with real subject IDs; live and spoof from the same people and session |
-| **Cross-attack eval** | `trainingdatapro/real-vs-fake-anti-spoofing-video-classification` | Phone replay — an attack type absent from training |
-| **External test** | self-collected | Unseen people, unseen cameras, unseen conditions |
+| **External test 1** | `trainingdatapro/real-vs-fake-anti-spoofing-video-classification` | Phone replay — unseen attack type |
+| **External test 2** | `trainingdatapro/cut-out-printout-attacks` | Printed mask, 9 further subjects |
+| **External test 3** | `trainingdatapro/biometric-attacks-in-different-lighting` | Display replay + 4 lighting conditions |
+| **Demo only** | self-collected (~6 clips) | Demo video and qualitative failure examples; no metrics claimed |
 
 ## Primary dataset structure
 
@@ -76,3 +78,47 @@ labels; mixed-label groups already guarantee both classes appear in every split.
 Both datasets are CC BY-NC / CC BY-NC-ND — non-commercial use only. Acceptable for a
 portfolio and academic project; attribution is included in the README. Any commercial
 deployment would require different data.
+
+
+## External test sets (added after primary selection)
+
+None of these are trained on. Each is evaluated once, at the threshold already fixed on
+the primary validation split, to answer: **does the model detect attack types it never
+saw during training?** This is a harder and more informative question than training on
+every attack type, and it is closer to reality — a deployed system meets attacks its
+training data did not contain.
+
+| Adapter | Dataset | Size | Contributes |
+|---|---|---|---|
+| `real_vs_fake` | real-vs-fake-anti-spoofing | 3.3 GB, 160 clips | phone replay |
+| `printout_masks` | cut-out-printout-attacks | 706 MB, 27 clips, 9 subjects | printed mask, live selfie/video |
+| `lighting` | biometric-attacks-in-different-lighting | 1.5 GB, 54 clips | display replay, print mask with cut-outs, and live footage in dark / daylight / lit / nightlight |
+
+### A label trap in the lighting dataset
+
+Its `type` values are not self-explanatory and guessing from the names inverts them:
+
+| Type | Actually is |
+|---|---|
+| `darkroom_video`, `daylight_video`, `lightroom_video`, `nightlight_video` | **LIVE** — a real person moving their head under that lighting |
+| `darkroom_photo`, `daylight_photo`, `lightroom_photo`, `nightlight_photo` | **SPOOF** — a photo displayed on a monitor and filmed |
+| `monitor_video` | **SPOOF** — a video replayed on a monitor and filmed |
+| `mask`, `outline` | **SPOOF** — printed 2D mask, with and without cut-out eye holes |
+
+`"<condition>_video"` reads like a replay attack and is not. Labelling it as one would
+have inverted every live sample in this set. The mapping is taken verbatim from the
+dataset card and is pinned by a regression test
+(`tests/test_manifest.py::test_lighting_video_types_are_live_not_spoof`).
+
+### Why the self-collected set was downgraded
+
+It was called mandatory when clip-level grouping was the only option and the project
+had no unseen-subject test at all. With subject-grouped splits on the primary dataset
+plus three external sets covering print, phone replay and display replay across many
+subjects and lighting conditions, that gap is closed by public data — with more
+subjects and more cameras than one person could film.
+
+What self-collected footage still uniquely provides is the deployment camera and a
+demo. Roughly six clips are recorded on day 3 for the demo video and qualitative
+failure examples only. **No metric is computed from them**, because six clips from one
+person cannot support one.
