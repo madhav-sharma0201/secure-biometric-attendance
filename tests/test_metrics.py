@@ -83,3 +83,18 @@ def test_degenerate_reject_everything_threshold_is_rejected():
     scores = np.array([0.5, 0.5, 0.5, 0.5])   # inseparable: APCER=0 only by rejecting all
     with pytest.raises(ValueError, match="rejects every bona fide"):
         select_threshold(labels, scores, criterion="apcer_target", target_apcer=0.0)
+
+
+def test_threshold_sits_in_the_middle_of_a_perfectly_separated_gap():
+    """Perfect validation separation makes many thresholds tie at zero cost.
+
+    Choosing the first leaves the operating point flush against the gap edge, so a
+    test score drifting slightly lands on the wrong side. This was the failure mode
+    on the first training run: validation ACER 0%, test BPCER 60%.
+    """
+    labels = np.array([1, 1, 1, 0, 0, 0])
+    scores = np.array([0.90, 0.92, 0.95, 0.10, 0.12, 0.08])
+    t = select_threshold(labels, scores, criterion="min_acer")
+    assert 0.12 < t < 0.90, f"threshold {t} is not inside the separating gap"
+    assert 0.4 < t < 0.6, f"threshold {t} is not near the middle of the gap"
+    assert compute_metrics(labels, scores, t).acer == 0.0

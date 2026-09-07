@@ -24,9 +24,18 @@ def export(ckpt_path: str, out_path: str, seq_len: int = 8, image_size: int = 11
              else torch.randn(1, 3, image_size, image_size))
     dynamic = {"input": {0: "batch"}, "output": {0: "batch"}}
 
-    torch.onnx.export(model, dummy, out_path, opset_version=opset,
-                      input_names=["input"], output_names=["output"],
-                      dynamic_axes=dynamic)
+    # dynamo=False pins the legacy exporter. Newer torch defaults to the dynamo
+    # path, which needs onnxscript and fails with ModuleNotFoundError where that is
+    # not installed — after training has already completed.
+    try:
+        torch.onnx.export(model, dummy, out_path, opset_version=opset,
+                          input_names=["input"], output_names=["output"],
+                          dynamic_axes=dynamic, dynamo=False)
+    except TypeError:
+        # Older torch has no dynamo argument and uses the legacy exporter anyway.
+        torch.onnx.export(model, dummy, out_path, opset_version=opset,
+                          input_names=["input"], output_names=["output"],
+                          dynamic_axes=dynamic)
 
     # Verify rather than assume: a silently wrong export produces a model that runs
     # and returns different numbers, which is worse than one that fails to load.

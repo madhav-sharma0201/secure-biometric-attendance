@@ -113,7 +113,19 @@ def trainingdatapro(root: str) -> list[dict]:
     def attack_of(rel: str):
         return "live" if label_of(rel) == "live" else "replay_phone"
 
-    return _rows_from_tree(root, label_of, attack_of)
+    def subject_of(rel: str):
+        """train/real_video/7.mp4 and train/attack/7.mp4 are the SAME person.
+
+        The attack clip is a replay of that person's genuine clip, so the numeric
+        filename is an implicit subject id. Treating each file as its own group would
+        let a person appear as live in train and as spoof in test.
+        """
+        parts = rel.split(os.sep)
+        split_dir = parts[0] if len(parts) > 1 else "x"
+        stem = os.path.splitext(os.path.basename(rel))[0].strip()
+        return f"rvf_{split_dir}_{stem}"
+
+    return _rows_from_tree(root, label_of, attack_of, subject_of)
 
 
 def printout_masks(root: str) -> list[dict]:

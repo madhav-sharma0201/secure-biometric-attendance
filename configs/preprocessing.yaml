@@ -18,7 +18,8 @@
 # current checkpoints were trained on 640-derived crops.
 
 detection:
-  det_size: 640          # detector input resolution (square)
+  det_size: 320          # 4.26x faster than 640 (see docs/results/inference-latency.md);
+                         # applied to BOTH preprocessing and serving, so crops match
   image_size: 112        # aligned crop size, fixed by the ArcFace template
 
 sampling:
