@@ -116,6 +116,111 @@ def trainingdatapro(root: str) -> list[dict]:
     return _rows_from_tree(root, label_of, attack_of)
 
 
+def printout_masks(root: str) -> list[dict]:
+    """`trainingdatapro/cut-out-printout-attacks` (Printed 2D Masks Attacks Video).
+
+    Layout: live_selfie/N.mp4, live_video/N.mp4, 2d_masks/N.mp4 for N in 0..8.
+    The index is a subject id shared across all three folders (9 subjects).
+
+    Note: one file is named "2 .mp4" with an embedded space. Walking the tree handles
+    that; parsing the CSV paths would not.
+    """
+    folder_map = {
+        "live_selfie": ("live", "live_selfie"),
+        "live_video": ("live", "live_video"),
+        "2d_masks": ("spoof", "print_mask"),
+    }
+    rows = []
+    for dirpath, _dirs, files in os.walk(root):
+        folder = os.path.basename(dirpath)
+        if folder not in folder_map:
+            continue
+        label, attack = folder_map[folder]
+        for fn in sorted(files):
+            if os.path.splitext(fn)[1].lower() not in VIDEO_EXT:
+                continue
+            person = os.path.splitext(fn)[0].strip()   # tolerate "2 .mp4"
+            rows.append({
+                "path": os.path.join(dirpath, fn),
+                "label": label,
+                "subject": f"pm_person_{person}",
+                "clip": f"pm_person_{person}_{folder}",
+                "attack_type": attack,
+                "session": "",
+            })
+    return rows
+
+
+# Type -> (label, attack_type) for the lighting dataset. Taken verbatim from the
+# dataset card, NOT inferred from the names: "<x>_video" reads like a replay attack
+# but is in fact a genuine recording of a person moving their head under that
+# lighting. Guessing here would have mislabelled every live sample as spoof.
+LIGHTING_TYPES = {
+    "darkroom_video":   ("live",  "live_darkroom"),
+    "daylight_video":   ("live",  "live_daylight"),
+    "lightroom_video":  ("live",  "live_lightroom"),
+    "nightlight_video": ("live",  "live_nightlight"),
+    "darkroom_photo":   ("spoof", "display_photo_darkroom"),
+    "daylight_photo":   ("spoof", "display_photo_daylight"),
+    "lightroom_photo":  ("spoof", "display_photo_lightroom"),
+    "nightlight_photo": ("spoof", "display_photo_nightlight"),
+    "monitor_video":    ("spoof", "display_replay"),
+    "outline":          ("spoof", "print_mask"),
+    "mask":             ("spoof", "print_mask_cutout"),
+}
+
+
+def lighting(root: str) -> list[dict]:
+    """`trainingdatapro/biometric-attacks-in-different-lighting`.
+
+    Flat `files/N.mp4` with labels only in dataset_info.csv, so this adapter is
+    CSV-driven rather than tree-driven. No subject identifier exists — acceptable
+    because this set is used only for evaluation and is never split.
+    """
+    csv_path = None
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in files:
+            if fn.lower() == "dataset_info.csv":
+                csv_path = os.path.join(dirpath, fn)
+                break
+    if csv_path is None:
+        raise SystemExit(f"dataset_info.csv not found under {root!r}")
+
+    by_name = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in files:
+            if os.path.splitext(fn)[1].lower() in VIDEO_EXT:
+                by_name.setdefault(fn, os.path.join(dirpath, fn))
+
+    rows, unknown = [], set()
+    with open(csv_path, newline="") as fh:
+        for r in csv.DictReader(fh):
+            fname = os.path.basename((r.get("file") or "").strip())
+            vtype = (r.get("type") or "").strip()
+            if vtype not in LIGHTING_TYPES:
+                unknown.add(vtype)
+                continue
+            path = by_name.get(fname)
+            if path is None:
+                continue
+            label, attack = LIGHTING_TYPES[vtype]
+            stem = os.path.splitext(fname)[0]
+            rows.append({
+                "path": path,
+                "label": label,
+                "subject": f"lt_{stem}",
+                "clip": f"lt_{stem}",
+                "attack_type": attack,
+                "session": "",
+            })
+
+    if unknown:
+        # Loud rather than silent: an unrecognised type means the vendor changed the
+        # schema, and quietly dropping those clips would shrink the test set unnoticed.
+        print(f"WARNING: unrecognised types skipped: {sorted(unknown)}")
+    return rows
+
+
 def selfcollected(root: str) -> list[dict]:
     """Self-collected set. Expected layout:
 
@@ -142,9 +247,14 @@ def selfcollected(root: str) -> list[dict]:
 
 
 ADAPTERS = {
-    "printed_masks": printed_masks,        # primary: has subject IDs
-    "trainingdatapro": trainingdatapro,    # secondary: phone replay, cross-attack eval
-    "selfcollected": selfcollected,        # external test set
+    # Primary: trained and tested on. Has subject IDs, matched live/spoof capture.
+    "printed_masks": printed_masks,
+    # External test sets: NEVER trained on. Each contributes unseen attack types.
+    "real_vs_fake": trainingdatapro,   # phone replay
+    "printout_masks": printout_masks,  # printed mask, 9 subjects
+    "lighting": lighting,              # display replay + 4 lighting conditions
+    # Optional demo footage.
+    "selfcollected": selfcollected,
 }
 
 
