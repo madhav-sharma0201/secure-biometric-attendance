@@ -72,6 +72,9 @@ class StubRecognition:
             return None, n
         return self._vec(int(round(img[:, :, 2].mean()))), 1
 
+    def embed_crop(self, crop_rgb):
+        return self._vec(int(round(crop_rgb[:, :, 2].mean())))
+
 
 def make_image(n_faces=1, person=5):
     img = np.zeros((240, 240, 3), dtype=np.uint8)
@@ -106,7 +109,10 @@ def client(tmp_path):
     app = main_mod.app
     app.dependency_overrides[db_mod.get_db] = override_db
 
-    with TestClient(app) as c:
+    from backend.app.core.config import settings as app_settings
+    app_settings.api_key = "test-key"
+
+    with TestClient(app, headers={"X-API-Key": "test-key"}) as c:
         # Installed AFTER startup: the lifespan builds the real services, so stubs
         # set before entering the context would simply be overwritten.
         faces, liveness, recog = StubFaceProcessor(), StubLiveness(), StubRecognition()
@@ -137,6 +143,14 @@ def _open_session(client):
         "end_time": (now + dt.timedelta(hours=1)).isoformat()})
     assert r.status_code == 201, r.text
     return r.json()
+
+
+def test_authenticated_routes_reject_a_missing_key(client):
+    from fastapi.testclient import TestClient
+    from backend.app import main as main_mod
+    with TestClient(main_mod.app) as bare:      # no X-API-Key header
+        assert bare.get("/users").status_code == 401
+        assert bare.get("/health").status_code == 200    # probes stay public
 
 
 def test_health_and_ready(client):

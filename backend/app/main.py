@@ -14,8 +14,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+import time
+import uuid
+
 from backend.app.api.routes import router
 from backend.app.core.config import settings
+from backend.app.core.security import require_api_key, verification_limiter
 from backend.app.core.db import get_engine, init_db
 from backend.app.core.decision import Thresholds
 from backend.app.schemas.api import HealthOut
@@ -70,6 +74,49 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Secure Biometric Attendance", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
+
+
+@app.middleware("http")
+async def observability_and_auth(request, call_next):
+    """Request logging, auth and rate limiting in one pass.
+
+    Logged: method, path, status, duration, request id, client. NOT logged: request
+    bodies, images, embeddings or headers — a verification request body is biometric
+    data, and an access log is exactly the wrong place for it.
+    """
+    request_id = str(uuid.uuid4())
+    t0 = time.perf_counter()
+    client = request.client.host if request.client else "unknown"
+
+    try:
+        require_api_key(request)
+    except Exception as exc:
+        status_code = getattr(exc, "status_code", 500)
+        log.warning("request_rejected", request_id=request_id, path=request.url.path,
+                    status=status_code, reason="auth", client=client)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=status_code,
+                            content={"detail": getattr(exc, "detail", "unauthorized")})
+
+    if request.url.path in ("/verify", "/attendance/mark"):
+        allowed, remaining = verification_limiter.check(client)
+        if not allowed:
+            log.warning("rate_limited", request_id=request_id, client=client,
+                        path=request.url.path)
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=429,
+                                content={"detail": "too many verification attempts"})
+
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - t0) * 1000
+
+    log.info("request", request_id=request_id, method=request.method,
+             path=request.url.path, status=response.status_code,
+             duration_ms=round(duration_ms, 2), client=client)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 app.include_router(router)
 
 
