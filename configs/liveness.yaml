@@ -1,0 +1,42 @@
+# Liveness training config. All hyperparameters live here, never in code.
+seed: 42
+
+data:
+  dataset_name: null          # set in Phase 2 once the dataset is chosen
+  root: data/processed
+  image_size: 112
+  sequence_length: 8          # frames per sample (temporal model only)
+  frame_stride: 3             # sample every Nth frame from the source video
+  split_by: subject           # NEVER 'frame' — prevents leakage (MLR-3)
+
+model:
+  arch: cnn_lstm              # 'cnn' (baseline) | 'cnn_lstm' (main)
+  backbone: mobilenet_v3_small
+  pretrained: true
+  temporal_model: lstm        # lstm | gru
+  hidden_size: 128
+  bidirectional: true
+  dropout: 0.3
+
+training:
+  batch_size: 32
+  learning_rate: 0.0003
+  epochs: 20
+  optimizer: adamw
+  weight_decay: 0.0001
+  scheduler: cosine
+  early_stopping_patience: 5
+  mixed_precision: true
+  num_workers: 2
+
+augmentation:
+  enabled: true
+  horizontal_flip: 0.5
+  color_jitter: 0.3
+  random_resized_crop: 0.3
+  jpeg_compression: 0.2       # mimics replay/recompression artifacts
+  motion_blur: 0.2
+
+output:
+  checkpoint_dir: models
+  run_log: runs
