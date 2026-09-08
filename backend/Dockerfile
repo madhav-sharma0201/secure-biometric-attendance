@@ -28,6 +28,10 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements-b
 COPY --chown=appuser:appuser backend/ ./backend/
 COPY --chown=appuser:appuser ml/ ./ml/
 COPY --chown=appuser:appuser configs/ ./configs/
+# Migrations ship with the image so the init container can run `alembic upgrade head`
+# against the exact schema this build expects.
+COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser alembic.ini ./alembic.ini
 
 # Model weights are mounted at runtime, not baked in: they are large, they change
 # independently of the code, and a trained model is data rather than source.

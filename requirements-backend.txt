@@ -14,3 +14,4 @@ onnxruntime>=1.17
 insightface>=0.7.3
 structlog>=24.1
 passlib[bcrypt]>=1.7
+prometheus-client>=0.20

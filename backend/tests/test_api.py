@@ -250,3 +250,74 @@ def test_biometric_deletion_preserves_attendance(client):
     r = client.delete(f"/users/{u['id']}/biometrics").json()
     assert r["embeddings_deleted"] == 1
     assert len(client.get("/attendance").json()) == 1     # audit trail survives
+
+
+# --- production hardening ---
+
+def test_too_many_frames_is_rejected(client):
+    from backend.app.core.config import settings
+    frames = [("frames", (f"{i}.jpg", make_image(1, 5), "image/jpeg"))
+              for i in range(settings.max_frames_per_request + 5)]
+    r = client.post("/verify", files=frames)
+    assert r.status_code == 413, r.text
+    assert "too many" in r.text
+
+
+def test_empty_upload_is_rejected(client):
+    r = client.post("/verify", files=[("frames", ("x.jpg", b"", "image/jpeg"))])
+    # an empty file decodes to nothing -> NO_FACE, never an approval
+    assert r.status_code in (200, 422)
+    if r.status_code == 200:
+        assert r.json()["decision"] == "rejected"
+
+
+def test_oversized_upload_is_rejected(client, monkeypatch):
+    from backend.app.core.config import settings
+    monkeypatch.setattr(settings, "max_upload_bytes", 1024)
+    big = b"\xff\xd8\xff" + b"\x00" * 4096
+    r = client.post("/verify", files=[("frames", ("big.jpg", big, "image/jpeg"))])
+    assert r.status_code == 413
+    assert "exceeds" in r.text
+
+
+def test_too_many_enrollment_images_is_rejected(client):
+    from backend.app.core.config import settings
+    u = client.post("/users", json={"student_id": "SBIG", "name": "T",
+                                    "email": "big@b.c"}).json()
+    imgs = [("images", (f"{i}.jpg", make_image(1, 5), "image/jpeg"))
+            for i in range(settings.max_enrollment_images + 3)]
+    r = client.post("/enrollment", data={"user_id": u["id"]}, files=imgs)
+    assert r.status_code == 413
+
+
+def test_cors_is_not_wildcarded_by_default():
+    """A wildcard origin would let any website drive this API via a visitor's browser."""
+    from backend.app.core.config import Settings
+    assert Settings().cors_origin_list == []
+
+
+def test_metrics_endpoint_exposes_counters(client):
+    client.get("/users")
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    body = r.text
+    assert "attendance_http_requests_total" in body
+    assert "attendance_models_loaded" in body
+
+
+def test_metrics_do_not_leak_user_identifiers(client):
+    """Per-user metric labels would let scrape history reconstruct attendance."""
+    u = client.post("/users", json={"student_id": "SMET", "name": "T",
+                                    "email": "met@b.c"}).json()
+    client.get(f"/users/{u['id']}")
+    body = client.get("/metrics").text
+    assert u["id"] not in body, "user id leaked into metrics labels"
+    assert "SMET" not in body
+
+
+def test_metric_paths_are_normalised(client):
+    """Raw ids in path labels would blow up cardinality unboundedly."""
+    from backend.app.core.metrics import normalise_path
+    assert normalise_path("/users/4eb5583f-99c1-4b16-8369-bb52737f1941") == "/users/{id}"
+    assert normalise_path("/health") == "/health"
+    assert normalise_path("/attendance") == "/attendance"

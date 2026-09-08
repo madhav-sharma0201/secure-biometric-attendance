@@ -44,5 +44,11 @@ def get_db() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create tables. Alembic would own this in production; adequate for this scope."""
+    """Create tables for local/test use only.
+
+    NOT used in deployment. create_all() silently skips tables that already exist, so
+    a column added later never appears in an existing database and the failure shows up
+    at runtime instead of at deploy time. Kubernetes runs `alembic upgrade head` in an
+    init container before the app starts.
+    """
     Base.metadata.create_all(get_engine())

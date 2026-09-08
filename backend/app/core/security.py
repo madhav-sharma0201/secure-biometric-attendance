@@ -17,7 +17,9 @@ from backend.app.core.config import settings
 
 # Endpoints reachable without a key. Verification is intentionally NOT here: a kiosk
 # gets a key. Probes are, because Kubernetes cannot present credentials.
-PUBLIC_PATHS = {"/health", "/ready", "/docs", "/openapi.json", "/redoc"}
+# /metrics is unauthenticated but must never be exposed publicly: the Ingress does
+# not route it, so only in-cluster scrapers can reach it.
+PUBLIC_PATHS = {"/health", "/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
 
 
 def require_api_key(request: Request) -> None:

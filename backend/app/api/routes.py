@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from sqlalchemy import select
 from sqlalchemy.orm import Session as OrmSession
 
+from backend.app.core.config import settings
 from backend.app.core.db import get_db
 from backend.app.models.db import Attendance, FaceEmbedding, Session as ClassSession, User
 from backend.app.schemas.api import (
@@ -26,8 +27,49 @@ router = APIRouter()
 
 
 def _decode(data: bytes) -> np.ndarray | None:
-    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    """Decode image bytes, returning None for anything unusable.
+
+    cv2.imdecode raises on empty or malformed input rather than returning None, which
+    turns a junk upload into a 500. Uploads are attacker-controlled, so decoding
+    failures must be an ordinary rejection, not an unhandled exception.
+    """
+    if not data:
+        return None
+    try:
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    except cv2.error:
+        return None
+    if img is None or img.size == 0:
+        return None
     return img
+
+
+async def _read_bounded(upload: UploadFile) -> bytes:
+    """Read an upload, refusing anything over the configured size.
+
+    Reading the whole body first and checking afterwards still buys the attacker the
+    memory; the cap is enforced while streaming so an oversized file is rejected
+    before it is fully buffered.
+    """
+    limit = settings.max_upload_bytes
+    chunks, total = [], 0
+    while True:
+        chunk = await upload.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                413, f"file exceeds the {limit // (1024 * 1024)} MB limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _enforce_count(items: list, limit: int, what: str) -> None:
+    if len(items) > limit:
+        raise HTTPException(413, f"too many {what}: {len(items)} sent, limit is {limit}")
+    if not items:
+        raise HTTPException(422, f"no {what} supplied")
 
 
 def _services(request):
@@ -104,10 +146,12 @@ async def enroll(request: Request, user_id: str = Form(...),
     if not user:
         raise HTTPException(404, "user not found")
 
+    _enforce_count(images, settings.max_enrollment_images, "enrollment images")
+
     svc = _services(request)
     accepted, rejected = [], 0
     for f in images:
-        img = _decode(await f.read())
+        img = _decode(await _read_bounded(f))
         if img is None:
             rejected += 1
             continue
@@ -150,10 +194,12 @@ async def verify(request: Request, frames: list[UploadFile] = File(...),
                  mark_attendance: bool = Form(True),
                  db: OrmSession = Depends(get_db)):
     """Verify a capture burst and, if approved, mark attendance."""
+    _enforce_count(frames, settings.max_frames_per_request, "frames")
+
     svc = _services(request)
     decoded = []
     for f in frames:
-        img = _decode(await f.read())
+        img = _decode(await _read_bounded(f))
         if img is not None:
             decoded.append(img)
 

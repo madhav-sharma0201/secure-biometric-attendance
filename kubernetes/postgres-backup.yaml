@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: attendance
+spec:
+  # Nightly at 02:00. A biometric attendance record is an institutional record; losing
+  # the database loses the audit trail, and the PVC is a single point of failure.
+  schedule: "0 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70          # postgres user in the alpine image
+            fsGroup: 70
+          containers:
+            - name: dump
+              image: postgres:16-alpine
+              env:
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: attendance-secrets, key: POSTGRES_PASSWORD } }
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  TS=$(date +%Y%m%d-%H%M%S)
+                  OUT=/backups/attendance-${TS}.sql.gz
+                  pg_dump -h postgres -U attendance -d attendance | gzip > "$OUT"
+                  # Verify the dump is non-trivial rather than assuming success; a
+                  # zero-byte backup that nobody checks is worse than none.
+                  SIZE=$(stat -c %s "$OUT")
+                  echo "wrote $OUT (${SIZE} bytes)"
+                  test "$SIZE" -gt 1024
+                  # Retain 14 days.
+                  find /backups -name 'attendance-*.sql.gz' -mtime +14 -delete
+                  ls -la /backups | tail -5
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests: { cpu: "50m", memory: "64Mi" }
+                limits:   { cpu: "300m", memory: "256Mi" }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: backups-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backups-pvc
+  namespace: attendance
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

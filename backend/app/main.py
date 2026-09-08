@@ -19,6 +19,7 @@ import uuid
 
 from backend.app.api.routes import router
 from backend.app.core.config import settings
+from backend.app.core import metrics
 from backend.app.core.security import require_api_key, verification_limiter
 from backend.app.core.db import get_engine, init_db
 from backend.app.core.decision import Thresholds
@@ -81,6 +82,7 @@ async def lifespan(app: FastAPI):
         log.error("recognition_model_load_failed", error=str(e))
 
     app.state.model_errors = model_errors
+    metrics.models_loaded.set(0 if model_errors else 1)
     app.state.services = Services(
         faces=faces, liveness=liveness, recognition=recognition,
         verification=VerificationService(faces, liveness, recognition, thresholds),
@@ -88,12 +90,27 @@ async def lifespan(app: FastAPI):
     log.info("startup", liveness_threshold=thresholds.liveness,
              identity_threshold=thresholds.identity,
              liveness_model=settings.liveness_model_path)
+
     yield
+
+    # Uvicorn stops accepting new connections on SIGTERM and waits for in-flight
+    # requests. A verification can take seconds, so terminationGracePeriodSeconds in
+    # the Deployment must exceed that or Kubernetes SIGKILLs mid-request.
+    log.info("shutdown", grace_seconds=settings.shutdown_grace_seconds)
 
 
 app = FastAPI(title="Secure Biometric Attendance", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
-                   allow_headers=["*"])
+# CORS is deny-by-default. The frontend is served from the same origin through nginx,
+# so no cross-origin access is needed in the deployed configuration. Wildcard origins
+# would let any site drive this API using a logged-in visitor's browser.
+if settings.cors_origin_list:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["X-API-Key", "Content-Type"],
+    )
 
 
 @app.middleware("http")
@@ -121,6 +138,7 @@ async def observability_and_auth(request, call_next):
     if request.url.path in ("/verify", "/attendance/mark"):
         allowed, remaining = verification_limiter.check(client)
         if not allowed:
+            metrics.rate_limited.inc()
             log.warning("rate_limited", request_id=request_id, client=client,
                         path=request.url.path)
             from fastapi.responses import JSONResponse
@@ -129,6 +147,10 @@ async def observability_and_auth(request, call_next):
 
     response = await call_next(request)
     duration_ms = (time.perf_counter() - t0) * 1000
+
+    label_path = metrics.normalise_path(request.url.path)
+    metrics.http_requests.labels(request.method, label_path, str(response.status_code)).inc()
+    metrics.http_duration.labels(request.method, label_path).observe(duration_ms / 1000)
 
     log.info("request", request_id=request_id, method=request.method,
              path=request.url.path, status=response.status_code,
@@ -152,6 +174,13 @@ def health():
         liveness_model_version=svc.liveness.model_version if svc else "unloaded",
         recognition_model_version=svc.recognition.model_version if svc else "unloaded",
     )
+
+
+@app.get("/metrics")
+def prometheus_metrics():
+    """Prometheus scrape endpoint. Internal only — not routed through the Ingress."""
+    from fastapi.responses import Response
+    return Response(content=metrics.render(), media_type="text/plain; version=0.0.4")
 
 
 @app.get("/ready")

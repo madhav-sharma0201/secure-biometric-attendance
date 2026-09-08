@@ -11,9 +11,12 @@ spec:
     metadata:
       labels: { app: frontend }
     spec:
+      terminationGracePeriodSeconds: 15
       securityContext:
         runAsNonRoot: true
         runAsUser: 101          # nginx user in the alpine image
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           image: attendance-frontend:latest
@@ -46,3 +49,13 @@ spec:
     - port: 80
       targetPort: 8080
   type: ClusterIP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: attendance
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: frontend }

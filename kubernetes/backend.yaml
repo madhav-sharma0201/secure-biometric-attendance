@@ -16,10 +16,38 @@ spec:
     metadata:
       labels: { app: backend }
     spec:
+      # A verification can take several seconds. Without a grace period longer than
+      # that, a rolling update SIGKILLs pods mid-request and users see failures during
+      # every deploy.
+      terminationGracePeriodSeconds: 40
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Schema migrations run to completion before any app container starts, so a
+      # rollout cannot serve traffic against a database it does not match.
+      initContainers:
+        - name: migrate
+          image: attendance-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: attendance-config }
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: attendance-secrets, key: POSTGRES_PASSWORD } }
+            - name: DATABASE_URL
+              value: postgresql+psycopg://attendance:$(POSTGRES_PASSWORD)@postgres:5432/attendance
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+
       containers:
         - name: backend
           image: attendance-backend:latest
@@ -75,8 +103,16 @@ spec:
           volumeMounts:
             - name: models
               mountPath: /app/models
+          # Drain window: stop receiving traffic before the process exits, so
+          # in-flight verifications are not cut off during a rollout.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           securityContext:
             allowPrivilegeEscalation: false
+            # Not read-only: InsightFace and ONNX Runtime write scratch files at load.
+            # Documented rather than silently left off.
             readOnlyRootFilesystem: false
             capabilities: { drop: ["ALL"] }
       volumes:
@@ -106,3 +142,45 @@ spec:
     - port: 8000
       targetPort: 8000
   type: ClusterIP     # internal only; the Ingress is the public edge
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: attendance
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: backend }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-network-policy
+  namespace: attendance
+spec:
+  # Default-deny for the backend: only the frontend and in-namespace scrapers may
+  # reach it, and it may only talk to Postgres and DNS. Without this, any compromised
+  # pod in the cluster can call the verification API directly.
+  podSelector:
+    matchLabels: { app: backend }
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: frontend } }
+        - namespaceSelector:
+            matchLabels: { name: attendance }
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: postgres } }
+      ports:
+        - port: 5432
+          protocol: TCP
+    - ports:                      # DNS
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
