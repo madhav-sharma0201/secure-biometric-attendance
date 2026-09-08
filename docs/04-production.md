@@ -126,3 +126,17 @@ kubectl -n attendance exec deploy/backend -- curl -fsS localhost:8000/ready
 
 `/ready` must return `models_loaded: true`. If it does not, the pod cannot verify
 anyone and must not receive traffic.
+
+### Adopting migrations on an existing database
+
+A database created by an earlier `create_all()` already has the tables but no Alembic
+version row, so the init container fails with `relation "sessions" already exists`.
+Stamp it once:
+
+```bash
+kubectl -n attendance run alembic-stamp --rm -i --restart=Never \
+  --image=attendance-backend:latest --image-pull-policy=IfNotPresent \
+  --command -- sh -c 'alembic stamp head'
+```
+
+A fresh database needs no stamp — `alembic upgrade head` creates everything.

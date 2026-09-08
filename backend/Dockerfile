@@ -25,16 +25,6 @@ COPY requirements-backend.txt .
 RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements-backend.txt \
     && rm -rf /wheels
 
-COPY --chown=appuser:appuser backend/ ./backend/
-COPY --chown=appuser:appuser ml/ ./ml/
-COPY --chown=appuser:appuser configs/ ./configs/
-# Migrations ship with the image so the init container can run `alembic upgrade head`
-# against the exact schema this build expects.
-COPY --chown=appuser:appuser migrations/ ./migrations/
-COPY --chown=appuser:appuser alembic.ini ./alembic.ini
-
-# Model weights are mounted at runtime, not baked in: they are large, they change
-# independently of the code, and a trained model is data rather than source.
 RUN mkdir -p /app/models && chown appuser:appuser /app/models
 
 USER appuser
@@ -50,6 +40,17 @@ ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
 RUN python -c "from insightface.app import FaceAnalysis; \
     a = FaceAnalysis(name='buffalo_l'); a.prepare(ctx_id=-1, det_size=(320, 320))" \
     && du -sh /home/appuser/.insightface
+
+# Application code last: it changes on every commit, so it must sit above nothing
+# expensive. Placing it before the weights download meant each code edit re-fetched
+# ~300 MB.
+COPY --chown=appuser:appuser backend/ ./backend/
+COPY --chown=appuser:appuser ml/ ./ml/
+COPY --chown=appuser:appuser configs/ ./configs/
+# Migrations ship with the image so the init container can run `alembic upgrade head`
+# against the exact schema this build expects.
+COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser alembic.ini ./alembic.ini
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
