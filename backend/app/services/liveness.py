@@ -31,7 +31,10 @@ class LivenessService:
     """Scores a sequence of aligned face crops as live or spoof."""
 
     def __init__(self, model_path: str, meta_path: str | None = None,
-                 sequence_length: int = 8, image_size: int = 112):
+                 sequence_length: int = 8, image_size: int | None = None):
+        from ml.preprocessing.face_processor import PREPROCESSING
+        if image_size is None:
+            image_size = PREPROCESSING["liveness_image_size"]
         self.model_path = model_path
         self.sequence_length = sequence_length
         self.image_size = image_size

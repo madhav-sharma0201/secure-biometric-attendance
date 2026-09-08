@@ -103,7 +103,11 @@ def process_manifest(
                 # our pipeline rather than a property of the face.
                 failed += 1
                 continue
-            crop_bgr = cv2.cvtColor(face.crop, cv2.COLOR_RGB2BGR)
+            # Cache the CONTEXT crop for liveness training, not the tight aligned
+            # crop. The tight crop is what the deployed model was trained on, and it
+            # discards the bezel/hand/screen-edge cues that betray a display attack.
+            src = face.context_crop if face.context_crop is not None else face.crop
+            crop_bgr = cv2.cvtColor(src, cv2.COLOR_RGB2BGR)
             cv2.imwrite(os.path.join(clip_dir, f"frame_{f_idx:03d}.jpg"), crop_bgr,
                         [cv2.IMWRITE_JPEG_QUALITY, 95])
             kept += 1

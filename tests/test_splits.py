@@ -176,3 +176,53 @@ def test_dataset_resolves_per_row_crops_dir(tmp_path):
     # A wrong shared directory must not matter when rows carry their own.
     ds = LivenessDataset(rows, str(tmp_path / "nonexistent"), mode="frame", seq_len=4)
     assert len(ds) == 4, f"expected 4 clips, got {len(ds)} (skipped: {ds.skipped})"
+
+
+# --- context crop for liveness ---
+
+def _fp():
+    from ml.preprocessing.face_processor import FaceProcessor
+    return FaceProcessor()
+
+
+def test_context_crop_is_larger_than_the_face_box():
+    """The tight ArcFace crop removes bezel/hand/screen-edge cues; the context crop
+    exists to keep them."""
+    import numpy as np
+    fp = _fp()
+    img = np.full((480, 640, 3), 128, dtype=np.uint8)
+    bbox = np.array([300, 200, 380, 300], dtype=float)   # 80x100 face
+    out = fp._context_crop(img, bbox)
+    assert out.shape == (fp.liveness_image_size, fp.liveness_image_size, 3)
+    assert fp.context_scale > 1.0
+
+
+def test_context_crop_covers_more_scene_than_the_face():
+    """Pixels outside the face box must actually appear in the crop."""
+    import numpy as np
+    fp = _fp()
+    img = np.zeros((480, 640, 3), dtype=np.uint8)
+    img[:, :] = (0, 0, 0)
+    # a bright border region well outside the face box
+    img[150:170, 250:450] = (255, 255, 255)
+    bbox = np.array([300, 200, 380, 300], dtype=float)
+    out = fp._context_crop(img, bbox)
+    assert out.max() > 200, "surrounding scene was cropped away"
+
+
+def test_context_crop_handles_a_face_at_the_frame_edge():
+    """A face at the border must not introduce a hard black rectangle that the model
+    could learn as a device edge."""
+    import numpy as np
+    fp = _fp()
+    img = np.full((480, 640, 3), 200, dtype=np.uint8)
+    bbox = np.array([0, 0, 60, 80], dtype=float)     # flush against the corner
+    out = fp._context_crop(img, bbox)
+    assert out.shape == (fp.liveness_image_size, fp.liveness_image_size, 3)
+    assert out.min() > 100, "edge padding introduced dark pixels"
+
+
+def test_liveness_input_is_decoupled_from_the_arcface_template():
+    fp = _fp()
+    assert fp.image_size == 112, "recognition crop must stay at the ArcFace template"
+    assert fp.liveness_image_size > fp.image_size, "liveness input should be larger"

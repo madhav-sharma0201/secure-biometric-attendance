@@ -11,8 +11,12 @@ import torch
 from ml.liveness.models import build_model
 
 
-def export(ckpt_path: str, out_path: str, seq_len: int = 8, image_size: int = 112,
-           opset: int = 17) -> str:
+def export(ckpt_path: str, out_path: str, seq_len: int = 8,
+           image_size: int | None = None, opset: int = 17) -> str:
+    from ml.preprocessing.face_processor import PREPROCESSING
+    if image_size is None:
+        image_size = PREPROCESSING["liveness_image_size"]
+
     ckpt = torch.load(ckpt_path, map_location="cpu")
     cfg = ckpt["config"]
     model = build_model(cfg["model"])

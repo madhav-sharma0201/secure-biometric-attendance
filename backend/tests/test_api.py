@@ -25,7 +25,8 @@ DIM = 128
 
 class StubFace:
     def __init__(self, crop):
-        self.crop = crop
+        self.crop = crop            # tight aligned crop -> recognition
+        self.context_crop = crop    # wider crop -> liveness
         self.bbox = np.array([0, 0, 112, 112])
         self.det_score = 0.99
 
@@ -321,3 +322,25 @@ def test_metric_paths_are_normalised(client):
     assert normalise_path("/users/4eb5583f-99c1-4b16-8369-bb52737f1941") == "/users/{id}"
     assert normalise_path("/health") == "/health"
     assert normalise_path("/attendance") == "/attendance"
+
+
+def test_audit_records_scores_even_when_rejected(client):
+    """Without the score on a rejected attempt, you cannot tell a spoof the model
+    caught from one it missed that a later rule happened to block."""
+    from sqlalchemy import select
+    from backend.app.models.db import VerificationAttempt
+    from backend.app.core import db as db_mod
+
+    _enroll(client, person=9, student_id="SAUD", email="aud@b.c")
+    s = _open_session(client)
+    frames = lambda: [("frames", (f"{i}.jpg", make_image(1, 9), "image/jpeg")) for i in range(4)]
+    client.post("/verify", data={"session_id": s["id"]}, files=frames())
+    client.post("/verify", data={"session_id": s["id"]}, files=frames())  # ALREADY_MARKED
+
+    with next(db_mod.get_db()) as session:
+        rows = session.execute(
+            select(VerificationAttempt).order_by(VerificationAttempt.created_at.desc())
+        ).scalars().all()
+    dup = [r for r in rows if r.reason == "ALREADY_MARKED"]
+    assert dup, "expected an ALREADY_MARKED attempt"
+    assert dup[0].liveness_confidence is not None, "rejected attempt lost its liveness score"

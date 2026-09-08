@@ -21,7 +21,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from ml.preprocessing.face_processor import normalize
+from ml.preprocessing.face_processor import PREPROCESSING, normalize
 
 
 class SequenceAugment:
@@ -137,7 +137,10 @@ class LivenessDataset(Dataset):
         for p in paths:
             img = cv2.imread(p)
             if img is None:
-                img = np.zeros((112, 112, 3), dtype=np.uint8)
+                # Match whatever size the cached crops actually are; hardcoding 112
+                # silently breaks once the liveness input is decoupled from ArcFace.
+                size = imgs[0].shape[0] if imgs else PREPROCESSING["liveness_image_size"]
+                img = np.zeros((size, size, 3), dtype=np.uint8)
             imgs.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
         if self.augment is not None:
@@ -183,7 +186,8 @@ def clip_eval_batches(rows, crops_dir, mode, seq_len=8, max_seqs=4):
             for p in view:
                 img = cv2.imread(p)
                 if img is None:
-                    img = np.zeros((112, 112, 3), dtype=np.uint8)
+                    img = np.zeros((PREPROCESSING["liveness_image_size"],
+                                    PREPROCESSING["liveness_image_size"], 3), dtype=np.uint8)
                 imgs.append(torch.from_numpy(normalize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))))
             batch.append(imgs[0] if mode == "frame" else torch.stack(imgs))
 

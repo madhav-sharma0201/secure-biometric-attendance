@@ -4,7 +4,7 @@ seed: 42
 data:
   dataset_name: null          # set in Phase 2 once the dataset is chosen
   root: data/processed
-  image_size: 112
+  image_size: 224          # liveness context crop; see configs/preprocessing.yaml
   sequence_length: 8          # frames per sample (temporal model only)
   frame_stride: 3             # sample every Nth frame from the source video
   split_by: subject           # NEVER 'frame' — prevents leakage (MLR-3)

@@ -20,7 +20,23 @@
 detection:
   det_size: 320          # 4.26x faster than 640 (see docs/results/inference-latency.md);
                          # applied to BOTH preprocessing and serving, so crops match
-  image_size: 112        # aligned crop size, fixed by the ArcFace template
+  image_size: 112        # ArcFace-aligned crop, fixed by the recognition template
+
+# Liveness input is deliberately DECOUPLED from the ArcFace crop.
+#
+# Recognition needs a tight, aligned 112x112 face — that template is fixed by the
+# pretrained backbone. The liveness model is trained here, so it is under no such
+# constraint, and the tight crop actively removes the evidence a screen attack leaves:
+# the bezel, the hand holding the device, the screen edge, reflections outside the face.
+# Downscaling to 112 also destroys moire and pixel-grid artifacts, which are
+# high-frequency by nature.
+#
+# Deployed model A scored 0% APCER on all 8 print-mask variants but 50% on photos shown
+# on a lit screen, and was defeated in live testing by both a phone photo and a replayed
+# video. Those are the cues it never got to see.
+liveness:
+  image_size: 224        # larger input preserves high-frequency screen artifacts
+  context_scale: 1.8     # crop 1.8x the face box, so bezel/hand/screen edge are in frame
 
 sampling:
   max_frames: 16         # frames cached per clip during preprocessing

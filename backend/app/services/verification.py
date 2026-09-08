@@ -81,7 +81,12 @@ class VerificationService:
                 found = self.faces.detect_all(frame)
                 per_frame_counts.append(len(found))
                 if len(found) == 1:
-                    crops.append(normalize(found[0].crop))
+                    # Liveness sees the wider CONTEXT crop (bezel, hand, screen edge);
+                    # recognition sees the tight ArcFace-aligned crop. Training and
+                    # serving must use the same one for each, or the measured metrics
+                    # stop predicting behaviour.
+                    ctx = found[0].context_crop
+                    crops.append(normalize(ctx if ctx is not None else found[0].crop))
                     aligned.append(found[0].crop)     # reused for the embedding
 
             # A frame showing two faces anywhere in the burst is treated as multiple
@@ -152,19 +157,32 @@ class VerificationService:
                 db.rollback()
                 payload = {"decision": "rejected", "reason": Reason.ALREADY_MARKED.value}
 
-        self._audit(db, payload, decision, n_faces, klass)
+        # Audit the RAW scores, not just the approved ones. Recording confidences only
+        # on success makes the one question that matters after an incident —
+        # "what did the model actually score that spoof?" — unanswerable.
+        self._audit(db, payload, decision, n_faces, klass,
+                    raw_liveness=liveness_score, raw_identity=identity_score,
+                    raw_match=matched_id)
         return payload
 
-    def _audit(self, db, payload, decision, n_faces, klass) -> None:
-        """Record the outcome. No images, no embeddings — see models/db.py."""
+    def _audit(self, db, payload, decision, n_faces, klass,
+               raw_liveness=None, raw_identity=None, raw_match=None) -> None:
+        """Record the outcome. No images, no embeddings — see models/db.py.
+
+        Scores are recorded for EVERY attempt, including rejected ones. The API
+        response still withholds them from the caller (see Decision.to_dict), but the
+        operator needs them: without the score on a rejected attempt there is no way
+        to tell a spoof the model caught from one it missed that some later rule
+        happened to block.
+        """
         from backend.app.models.db import VerificationAttempt
         db.add(VerificationAttempt(
             session_id=klass.id if klass else None,
-            matched_user_id=decision.user_id if decision.approved else None,
+            matched_user_id=raw_match,
             approved=decision.approved,
             reason=payload.get("reason"),
-            liveness_confidence=decision.liveness_confidence,
-            identity_confidence=decision.identity_confidence if decision.approved else None,
+            liveness_confidence=raw_liveness,
+            identity_confidence=raw_identity,
             n_faces=n_faces,
             liveness_model_version=getattr(self.liveness, "model_version", "unknown"),
         ))

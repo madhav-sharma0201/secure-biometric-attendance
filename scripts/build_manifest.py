@@ -233,6 +233,120 @@ def lighting(root: str) -> list[dict]:
     return rows
 
 
+# Folder-name keywords -> (label, attack_type) for vendor datasets whose layout is a
+# flat set of category folders.
+#
+# This table is EXPLICIT rather than inferred. The lighting dataset taught the lesson:
+# "<condition>_video" reads like a replay attack but is a genuine recording, and
+# guessing would have inverted every live sample. Anything not listed here is skipped
+# loudly rather than assigned a guess.
+FOLDER_LABELS = {
+    # live
+    "real":            ("live",  "live"),
+    "live":            ("live",  "live"),
+    "live_videos":     ("live",  "live"),
+    "live_video":      ("live",  "live"),
+    "live_selfie":     ("live",  "live_selfie"),
+    "genuine":         ("live",  "live"),
+    # display / screen attacks — the failure mode this retrain targets
+    "screen":          ("spoof", "display_screen"),
+    "monitor":         ("spoof", "display_monitor"),
+    "display":         ("spoof", "display_screen"),
+    "replay":          ("spoof", "display_replay"),
+    "phone":           ("spoof", "display_phone"),
+    "laptop":          ("spoof", "display_laptop"),
+    "tablet":          ("spoof", "display_tablet"),
+    "monitor_video":   ("spoof", "display_monitor"),
+    # print / mask attacks
+    "mask":            ("spoof", "print_mask"),
+    "print":           ("spoof", "print_photo"),
+    "printed":         ("spoof", "print_photo"),
+    "photo":           ("spoof", "print_photo"),
+    "outline":         ("spoof", "print_mask"),
+    "cutout":          ("spoof", "print_mask_cutout"),
+    "paper":           ("spoof", "print_photo"),
+}
+
+MEDIA_EXT = VIDEO_EXT | {".jpg", ".jpeg", ".png"}
+
+
+def folder_categorised(root: str, source_tag: str = "webcam") -> list[dict]:
+    """Generic adapter for datasets laid out as <root>/**/<category>/<file>.
+
+    Reports every folder it sees and how it labelled it, so a wrong mapping is visible
+    before training rather than after.
+    """
+    rows: list[dict] = []
+    seen: dict[str, int] = {}
+    skipped: dict[str, int] = {}
+
+    for dirpath, _dirs, files in os.walk(root):
+        folder = os.path.basename(dirpath).lower().replace("-", "_").replace(" ", "_")
+        media = [f for f in sorted(files)
+                 if os.path.splitext(f)[1].lower() in MEDIA_EXT]
+        if not media:
+            continue
+
+        match = None
+        for key, val in FOLDER_LABELS.items():
+            if key == folder or folder.startswith(key + "_") or folder.endswith("_" + key):
+                match = val
+                break
+        if match is None:
+            for key, val in FOLDER_LABELS.items():
+                if key in folder:
+                    match = val
+                    break
+        if match is None:
+            skipped[folder] = skipped.get(folder, 0) + len(media)
+            continue
+
+        label, attack = match
+        seen[f"{folder} -> {label}/{attack}"] = seen.get(f"{folder} -> {label}/{attack}", 0) + len(media)
+        for fn in media:
+            stem = os.path.splitext(fn)[0].strip()
+            rows.append({
+                "path": os.path.join(dirpath, fn),
+                "label": label,
+                # No person identifier in these releases. Subject == file, so grouping
+                # is clip-level here; recorded honestly rather than invented.
+                "subject": f"{source_tag}_{folder}_{stem}",
+                "clip": f"{source_tag}_{folder}_{stem}",
+                "attack_type": attack,
+                "session": "",
+            })
+
+    print(f"  [{source_tag}] folder -> label mapping:")
+    for k, n in sorted(seen.items()):
+        print(f"      {k:<46} {n} files")
+    if skipped:
+        print(f"  [{source_tag}] SKIPPED unrecognised folders (not guessed):")
+        for k, n in sorted(skipped.items()):
+            print(f"      {k:<46} {n} files")
+    return rows
+
+
+def webcam_attacks(root: str) -> list[dict]:
+    """`trainingdatapro/full-hd-webcam-live-attacks` and `low-webcam-live-attacks`."""
+    return folder_categorised(root, source_tag="webcam")
+
+
+def web_camera_liveness(root: str) -> list[dict]:
+    """`trainingdatapro/web-camera-face-liveness-detection` — webcam-domain monitor
+    and mask attacks, the closest public match to a laptop-kiosk deployment."""
+    return folder_categorised(root, source_tag="webcamlive")
+
+
+def display_attacks(root: str) -> list[dict]:
+    """`axondata/liveness-detection-real-and-display-attacks-5k` — Real/ vs Screen/.
+
+    NOTE: its live samples are stills and its attacks are videos. That asymmetry is a
+    source-bias risk on its own, so this set is used ALONGSIDE matched-capture sources,
+    never as the only display-attack data.
+    """
+    return folder_categorised(root, source_tag="display")
+
+
 def selfcollected(root: str) -> list[dict]:
     """Self-collected set. Expected layout:
 
@@ -261,6 +375,10 @@ def selfcollected(root: str) -> list[dict]:
 ADAPTERS = {
     # Primary: trained and tested on. Has subject IDs, matched live/spoof capture.
     "printed_masks": printed_masks,
+    # Webcam- and display-domain sources added to fix the display-attack failure.
+    "webcam_attacks": webcam_attacks,
+    "web_camera_liveness": web_camera_liveness,
+    "display_attacks": display_attacks,
     # External test sets: NEVER trained on. Each contributes unseen attack types.
     "real_vs_fake": trainingdatapro,   # phone replay
     "printout_masks": printout_masks,  # printed mask, 9 subjects
